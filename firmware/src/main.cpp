@@ -659,28 +659,143 @@ void drawAmbientTopGlow(uint16_t accentCol, int glowHeight = 80) {
   }
 }
 
+// --- Android-Style Universal Top Status Bar ---
+static String lastStatusTime = "";
+static String lastStatusWeather = "";
+static int lastStatusBars = -1;
+static uint8_t lastStatusConn = 255;
+
+void drawStatusBar(bool forceRedraw = false) {
+  int w = tft.width();
+  int barH = 16;
+
+  // Extract short time (HH:MM or H:MM)
+  String shortTime = "";
+  if (state.timeStr.length() > 0) {
+    int sp = state.timeStr.indexOf(' ');
+    shortTime = (sp > 0) ? state.timeStr.substring(0, sp) : state.timeStr;
+    int col2 = shortTime.lastIndexOf(':');
+    if (col2 > 2 && col2 != shortTime.indexOf(':')) {
+      shortTime = shortTime.substring(0, col2);
+    }
+  } else {
+    shortTime = "12:00";
+  }
+
+  // Wi-Fi RSSI Bars
+  int rssi = (WiFi.status() == WL_CONNECTED) ? WiFi.RSSI() : -120;
+  int bars = 0;
+  if (WiFi.status() == WL_CONNECTED) {
+    if (rssi > -60) bars = 4;
+    else if (rssi > -70) bars = 3;
+    else if (rssi > -80) bars = 2;
+    else bars = 1;
+  }
+
+  // Connection mode: 2 = App Connected, 1 = Standalone WiFi, 0 = Offline
+  uint8_t connMode = 0;
+  if (state.clientCount > 0) connMode = 2;
+  else if (WiFi.status() == WL_CONNECTED) connMode = 1;
+
+  // Weather text: "24C"
+  String weatherTxt = "";
+  if (weatherState.valid) {
+    weatherTxt = String(weatherState.temp) + "C";
+  } else if (dhtSensor.valid) {
+    weatherTxt = String((int)dhtSensor.temperature) + "C";
+  } else {
+    weatherTxt = "24C";
+  }
+
+  if (forceRedraw) {
+    tft.fillRect(0, 0, w, barH, ILI9341_BLACK);
+    tft.drawFastHLine(0, barH - 1, w, 0x18C3);
+    lastStatusTime = "";
+    lastStatusWeather = "";
+    lastStatusBars = -1;
+    lastStatusConn = 255;
+  }
+
+  // Left: Connection pulse dot & Clock Time
+  if (forceRedraw || shortTime != lastStatusTime || connMode != lastStatusConn) {
+    lastStatusTime = shortTime;
+    lastStatusConn = connMode;
+    tft.fillRect(4, 2, 54, barH - 3, ILI9341_BLACK);
+
+    // Status dot
+    uint16_t dotCol = (connMode == 2) ? 0x15D0 : ((connMode == 1) ? 0x07FF : 0xF800);
+    tft.fillCircle(8, 7, 2, dotCol);
+
+    // Time text
+    tft.setTextSize(1);
+    tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK);
+    tft.setCursor(14, 4);
+    tft.print(shortTime);
+  }
+
+  // Right: Weather
+  if (forceRedraw || weatherTxt != lastStatusWeather) {
+    lastStatusWeather = weatherTxt;
+    tft.fillRect(w - 74, 2, 52, barH - 3, ILI9341_BLACK);
+
+    // Mini weather sun icon
+    tft.fillCircle(w - 68, 7, 2, 0xFD20);
+    tft.drawPixel(w - 68, 4, 0xFD20);
+    tft.drawPixel(w - 68, 10, 0xFD20);
+    tft.drawPixel(w - 71, 7, 0xFD20);
+    tft.drawPixel(w - 65, 7, 0xFD20);
+
+    // Weather text
+    tft.setTextSize(1);
+    tft.setTextColor(0xCE79, ILI9341_BLACK);
+    tft.setCursor(w - 60, 4);
+    tft.print(weatherTxt);
+  }
+
+  // Wi-Fi 4-bar signal icon at w - 18
+  if (forceRedraw || bars != lastStatusBars) {
+    lastStatusBars = bars;
+    int wifiX = w - 18;
+    tft.fillRect(wifiX - 2, 2, 18, barH - 3, ILI9341_BLACK);
+
+    if (bars == 0) {
+      tft.drawLine(wifiX, 4, wifiX + 8, 12, 0xF800);
+      tft.drawLine(wifiX + 8, 4, wifiX, 12, 0xF800);
+    } else {
+      for (int i = 0; i < 4; i++) {
+        int bh = 3 + i * 2;
+        int bx = wifiX + i * 3;
+        int by = 13 - bh;
+        uint16_t bCol = (bars > i) ? state.accentColor : 0x2104;
+        tft.fillRect(bx, by, 2, bh, bCol);
+      }
+    }
+  }
+}
+
 void drawHeader() {
   int w = tft.width();
   int h = tft.height();
-  int headerH = 44;
+  int headerTop = 16;
+  int headerH = 40;
 
-  // Clear top header area cleanly to pitch black
-  tft.fillRect(0, 0, w, headerH, ILI9341_BLACK);
+  // Clear top header area cleanly to pitch black below status bar
+  tft.fillRect(0, headerTop, w, headerH, ILI9341_BLACK);
 
-  // Album Artwork Thumbnail (32x32) at (7, 6)
+  // Album Artwork Thumbnail (32x32) at (7, 20)
   if (hasAlbumThumb) {
-    tft.drawRGBBitmap(7, 6, albumThumb, 32, 32);
-    tft.drawRoundRect(6, 5, 34, 34, 4, state.accentColor);
+    tft.drawRGBBitmap(7, 20, albumThumb, 32, 32);
+    tft.drawRoundRect(6, 19, 34, 34, 4, state.accentColor);
   } else {
     // Stylized mini vinyl/artwork card with accent color
-    tft.fillRoundRect(6, 5, 34, 34, 4, 0x10A2);
-    tft.drawRoundRect(6, 5, 34, 34, 4, state.accentColor);
-    tft.fillCircle(23, 22, 10, 0x2104);
-    tft.drawCircle(23, 22, 7, 0x39E7);
-    tft.fillCircle(23, 22, 3, state.accentColor);
+    tft.fillRoundRect(6, 19, 34, 34, 4, 0x10A2);
+    tft.drawRoundRect(6, 19, 34, 34, 4, state.accentColor);
+    tft.fillCircle(23, 36, 10, 0x2104);
+    tft.drawCircle(23, 36, 7, 0x39E7);
+    tft.fillCircle(23, 36, 3, state.accentColor);
   }
 
-  // Track Title (Beside thumbnail at X=46, Y=7)
+  // Track Title (Beside thumbnail at X=46, Y=21)
   String trackDisplay = state.trackName;
   uint8_t trackSize = (trackDisplay.length() <= 11) ? 2 : 1;
   int maxTrackChars = (trackSize == 2) ? 12 : ((w >= 320) ? 30 : 24);
@@ -689,10 +804,10 @@ void drawHeader() {
   }
   tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK);
   tft.setTextSize(trackSize);
-  tft.setCursor(46, trackSize == 2 ? 8 : 10);
+  tft.setCursor(46, trackSize == 2 ? 21 : 22);
   tft.print(trackDisplay);
 
-  // Artist Name (Beside thumbnail at X=46, Y=25)
+  // Artist Name (Beside thumbnail at X=46, Y=38)
   String artistDisplay = state.artistName;
   int maxArtistChars = (w >= 320) ? 34 : 22;
   if (artistDisplay.length() > maxArtistChars) {
@@ -700,14 +815,14 @@ void drawHeader() {
   }
   tft.setTextColor(0xAD55, ILI9341_BLACK);
   tft.setTextSize(1);
-  tft.setCursor(46, 25);
+  tft.setCursor(46, 38);
   tft.print(artistDisplay);
 
   // LRC Badge on Top-Right
   int badgeW = 28;
   int badgeH = 14;
   int badgeX = w - badgeW - 7;
-  int badgeY = 7;
+  int badgeY = 20;
   tft.drawRoundRect(badgeX, badgeY, badgeW, badgeH, 3, state.hasLyrics ? state.accentColor : 0x4208);
   tft.setTextColor(state.hasLyrics ? state.accentColor : 0x4208, ILI9341_BLACK);
   tft.setTextSize(1);
@@ -715,10 +830,10 @@ void drawHeader() {
   tft.print("LRC");
 
   // Play/Pause dot below LRC badge
-  tft.fillCircle(w - 14, 28, 3, state.isPlaying ? state.accentColor : 0x632C);
+  tft.fillCircle(w - 14, 41, 3, state.isPlaying ? state.accentColor : 0x632C);
 
   // Subtle clean horizontal divider line matching mockup border-neutral-850
-  tft.drawFastHLine(6, headerH - 1, w - 12, 0x2965);
+  tft.drawFastHLine(6, headerTop + headerH - 1, w - 12, 0x2965);
 }
 
 void drawLargeAlbumArt(int startX, int startY, int targetSize) {
@@ -759,13 +874,13 @@ void drawNowPlayingView(bool forceRedraw = false) {
   int h = tft.height();
 
   if (forceRedraw) {
-    tft.fillRect(0, 0, w, h, ILI9341_BLACK);
+    tft.fillRect(0, 16, w, h - 16, ILI9341_BLACK);
     drawAmbientTopGlow(state.accentColor, 80);
 
     // Large Album Art (Centered)
     int artSize = (w >= 320) ? 144 : 128;
     int artX = (w - artSize) / 2;
-    int artY = (h >= 320) ? 26 : 14;
+    int artY = (h >= 320) ? 30 : 20;
     drawLargeAlbumArt(artX, artY, artSize);
 
     // Track Title (Centered below art)
@@ -811,7 +926,7 @@ void drawClockView(bool forceRedraw = false) {
   int h = tft.height();
 
   if (forceRedraw || lastDrawnClockAccent != state.accentColor) {
-    tft.fillRect(0, 0, w, h, ILI9341_BLACK);
+    tft.fillRect(0, 16, w, h - 16, ILI9341_BLACK);
     drawAmbientTopGlow(state.accentColor, 80);
     lastDrawnClockTime = "";
     lastDrawnClockDate = "";
@@ -821,7 +936,7 @@ void drawClockView(bool forceRedraw = false) {
 
   // Large Clock Time (e.g. "12:29 am")
   String tStr = state.timeStr.length() > 0 ? state.timeStr : "12:00 am";
-  int timeY = (h >= 320) ? 62 : 32;
+  int timeY = (h >= 320) ? 66 : 34;
 
   // Differential Time update: Only rewrite the time bounding area without clearing whole screen!
   if (tStr != lastDrawnClockTime) {
@@ -923,12 +1038,12 @@ void drawWeatherView(bool forceRedraw = false) {
   int h = tft.height();
 
   if (forceRedraw) {
-    tft.fillRect(0, 0, w, h, ILI9341_BLACK);
+    tft.fillRect(0, 16, w, h - 16, ILI9341_BLACK);
     drawAmbientTopGlow(state.accentColor, 80);
   }
 
   // Location / City
-  int topY = (h >= 320) ? 38 : 18;
+  int topY = (h >= 320) ? 42 : 22;
   String city = weatherState.city;
   drawCenteredText(city, topY, 1, 0x8410, ILI9341_BLACK);
 
@@ -1046,7 +1161,7 @@ void drawKnobSwitcherMenu() {
 void drawLyricsView(bool forceRedraw = false) {
   int w = tft.width();
   int h = tft.height();
-  int lyricsTop = 46;
+  int lyricsTop = 58;
   int footerTop = h - 34;
   int lyricsHeight = footerTop - lyricsTop;
   int centerY = lyricsTop + lyricsHeight / 2 + localScrollOffset;
@@ -1840,6 +1955,9 @@ void loop() {
   // 3. Display Refresh Engine (Zero-Flicker & Autonomous Standalone)
   if (!isKnobMenuOpen && millis() - lastTftUpdate >= 50) {
     lastTftUpdate = millis();
+
+    // Draw Android-style universal top status bar across all screens (Wi-Fi, time, weather)
+    drawStatusBar(fullRedrawNeeded);
 
     if (state.clientCount == 0) {
       // Standalone Mode: PC asleep / off -> Screen stays fully alive and functioning!

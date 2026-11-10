@@ -549,6 +549,32 @@ export const HardwareStudioView: React.FC = () => {
               }}
             />
 
+            {/* ANDROID-STYLE TOP STATUS BAR (Uniform across all screens) */}
+            <div className="relative z-20 flex items-center justify-between px-1 pb-1.5 mb-1 text-[10px] font-mono border-b border-neutral-850/60 text-neutral-400 select-none">
+              {/* Left: Connected Status Dot & Time */}
+              <div className="flex items-center gap-1.5 font-bold text-neutral-200">
+                <span
+                  className={`w-1.5 h-1.5 rounded-full ${
+                    isConnected ? 'bg-emerald-400 animate-pulse' : 'bg-cyan-400'
+                  }`}
+                />
+                <span>
+                  {liveClock.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: false })}
+                </span>
+              </div>
+
+              {/* Right: Weather & Wi-Fi Strength */}
+              <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1 text-neutral-300">
+                  <CloudSun className="w-3 h-3 text-amber-400" />
+                  <span className="font-semibold">{liveWeather?.temp ?? 24}°C</span>
+                </div>
+                <div className="flex items-center gap-0.5 text-emerald-400">
+                  <Wifi className="w-3 h-3" />
+                </div>
+              </div>
+            </div>
+
             {/* SCREEN CONTENT 1: SYNCED LYRICS (PORTRAIT) */}
             {activeScreen === 'lyrics' && (
               <div className="relative z-10 flex-1 flex flex-col justify-between py-1 px-1 text-center">
