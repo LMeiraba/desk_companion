@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { usePlayerStore } from '../../stores/usePlayerStore';
 import { useLyricsStore } from '../../stores/useLyricsStore';
 import { controlRouter } from '../../services/controlRouter';
@@ -28,17 +28,26 @@ export const MiniPlayerModal: React.FC<MiniPlayerModalProps> = ({ isOpen, onClos
   const duration = playbackState?.durationMs || 1000;
   const isPlaying = playbackState?.isPlaying || false;
 
-  // Toggle true OS-level Always-on-Top and compact window size in Tauri
+  const prevOpenRef = useRef(false);
+
+  // Toggle true OS-level Always-on-Top and compact window size in Tauri ONLY on actual state transitions
   useEffect(() => {
-    if (isOpen) {
+    if (isOpen && !prevOpenRef.current) {
+      prevOpenRef.current = true;
       tauriIpc.setMiniPlayerMode(true);
-    } else {
+    } else if (!isOpen && prevOpenRef.current) {
+      prevOpenRef.current = false;
       tauriIpc.setMiniPlayerMode(false);
     }
-    return () => {
-      tauriIpc.setMiniPlayerMode(false);
-    };
   }, [isOpen]);
+
+  useEffect(() => {
+    return () => {
+      if (prevOpenRef.current) {
+        tauriIpc.setMiniPlayerMode(false);
+      }
+    };
+  }, []);
 
   const handleExpand = () => {
     tauriIpc.setMiniPlayerMode(false);

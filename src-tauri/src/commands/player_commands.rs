@@ -153,11 +153,14 @@ pub async fn set_mini_player_window(
 ) -> Result<(), AppError> {
     use tauri::{LogicalSize, Size};
     if enabled {
+        crate::window_state::stash_pre_mini_player_state(&window);
         let _ = window.set_always_on_top(true);
         let _ = window.set_size(Size::Logical(LogicalSize { width: 380.0, height: 185.0 }));
     } else {
         let _ = window.set_always_on_top(false);
-        let _ = window.set_size(Size::Logical(LogicalSize { width: 1200.0, height: 800.0 }));
+        if !crate::window_state::restore_pre_mini_player_state(&window) {
+            crate::window_state::restore_window_state(&window);
+        }
     }
     Ok(())
 }

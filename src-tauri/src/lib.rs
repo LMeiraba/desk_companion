@@ -9,6 +9,7 @@ pub mod spotify_domain;
 pub mod spotify_protocol;
 pub mod state;
 pub mod windows_media;
+pub mod window_state;
 
 use commands::*;
 use state::AppState;
@@ -93,14 +94,26 @@ pub fn run() {
                 })
                 .build(app)?;
 
+            // Restore saved window position and size
+            if let Some(window) = app.get_webview_window("main") {
+                crate::window_state::restore_window_state(&window.as_ref().window());
+            }
+
             Ok(())
         })
-        .on_window_event(|window, event| {
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                // Minimize to tray on close
+        .on_window_event(|window, event| match event {
+            tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_) => {
+                crate::window_state::save_window_state(window);
+            }
+            tauri::WindowEvent::CloseRequested { api, .. } => {
+                crate::window_state::save_window_state(window);
                 let _ = window.hide();
                 api.prevent_close();
             }
+            tauri::WindowEvent::Destroyed => {
+                crate::window_state::save_window_state(window);
+            }
+            _ => {}
         })
         .invoke_handler(tauri::generate_handler![
             // Auth commands
