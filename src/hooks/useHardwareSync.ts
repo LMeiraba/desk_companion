@@ -13,7 +13,7 @@ import { weatherService, WeatherData } from '../services/weatherService';
  */
 export function useHardwareSync() {
   const { playbackState, deckScreen } = usePlayerStore();
-  const { parsedLines, pacedLines, activeLineIndex, activePacedIndex, isSynced } = useLyricsStore();
+  const { parsedLines, pacedLines, activeLineIndex, activePacedIndex, isSynced, isPacedMode } = useLyricsStore();
   const dominantColorRef = useRef<string>('#10b981');
   const albumArtB64Ref = useRef<string | null>(null);
   const lastSentTimeRef = useRef<number>(0);
@@ -107,9 +107,9 @@ export function useHardwareSync() {
       const activeIsPlaying = currentUseWinMedia && currentWinMedia ? currentWinMedia.isPlaying : isSpotifyPlayingNow;
       const trackId = currentUseWinMedia && currentWinMedia ? `win_${currentWinMedia.source}_${currentWinMedia.title}` : (playbackState?.track?.id || '');
 
-      // Direct stream of paced sub-chunks: guarantees bold size 2 typography and 100% parity
-      const stream = pacedLines && pacedLines.length > 0 ? pacedLines : parsedLines;
-      const currentIndex = pacedLines && pacedLines.length > 0 ? activePacedIndex : activeLineIndex;
+      // Stream of lyrics lines (sub-chunk split mode if enabled, else full verse lines)
+      const stream = isPacedMode && pacedLines && pacedLines.length > 0 ? pacedLines : parsedLines;
+      const currentIndex = isPacedMode && pacedLines && pacedLines.length > 0 ? activePacedIndex : activeLineIndex;
 
       const currentLyric = isSynced
         ? (currentIndex >= 0 && stream[currentIndex]
@@ -202,6 +202,7 @@ export function useHardwareSync() {
     activeLineIndex,
     activePacedIndex,
     isSynced,
+    isPacedMode,
     parsedLines,
     pacedLines,
   ]);

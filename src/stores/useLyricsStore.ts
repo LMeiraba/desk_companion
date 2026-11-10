@@ -14,7 +14,10 @@ interface LyricsState {
   activePacedIndex: number;
   isSynced: boolean;
   manualOffsetMs: number;
+  isPacedMode: boolean;
 
+  setIsPacedMode: (enabled: boolean) => void;
+  togglePacedMode: () => void;
   fetchLyricsForTrack: (
     trackId: string,
     trackName: string,
@@ -38,6 +41,18 @@ export const useLyricsStore = create<LyricsState>((set, get) => ({
   activePacedIndex: -1,
   isSynced: false,
   manualOffsetMs: 0,
+  isPacedMode: localStorage.getItem('dc_split_lyrics') !== 'false',
+
+  setIsPacedMode: (enabled: boolean) => {
+    localStorage.setItem('dc_split_lyrics', String(enabled));
+    set({ isPacedMode: enabled });
+  },
+
+  togglePacedMode: () => {
+    const next = !get().isPacedMode;
+    localStorage.setItem('dc_split_lyrics', String(next));
+    set({ isPacedMode: next });
+  },
 
   fetchLyricsForTrack: async (
     trackId: string,

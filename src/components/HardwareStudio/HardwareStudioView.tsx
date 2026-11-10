@@ -33,10 +33,10 @@ import { DISPLAY_W, DISPLAY_H } from '../../services/displayConstants';
 
 export const HardwareStudioView: React.FC = () => {
   const { playbackState, deckScreen: activeScreen, setDeckScreen: setActiveScreen } = usePlayerStore();
-  const { parsedLines, pacedLines, activeLineIndex, activePacedIndex, isSynced } = useLyricsStore();
+  const { parsedLines, pacedLines, activeLineIndex, activePacedIndex, isSynced, isPacedMode } = useLyricsStore();
 
-  const activeStream = pacedLines && pacedLines.length > 0 ? pacedLines : parsedLines;
-  const activeIndex = pacedLines && pacedLines.length > 0 ? activePacedIndex : activeLineIndex;
+  const activeStream = isPacedMode && pacedLines && pacedLines.length > 0 ? pacedLines : parsedLines;
+  const activeIndex = isPacedMode && pacedLines && pacedLines.length > 0 ? activePacedIndex : activeLineIndex;
 
   // Screen Modes: 'now_playing' | 'lyrics' | 'clock' | 'weather'
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -333,6 +333,7 @@ export const HardwareStudioView: React.FC = () => {
     activeStream,
     activeIndex,
     isSynced,
+    isPacedMode,
     liveClock,
     liveWeather,
     isConnected,

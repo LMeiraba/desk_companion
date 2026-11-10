@@ -128,9 +128,39 @@ String hudMessage = "";
 int localScrollOffset = 0;
 uint32_t lastNtpSyncMs = 0;
 
-// --- Rotary Encoder State ---
+// --- Robust Noise-Immune Rotary Encoder State Machine (Buxton Algorithm) ---
+#define DIR_NONE 0x00
+#define DIR_CW   0x10
+#define DIR_CCW  0x20
+
+#define R_START     0x0
+#define R_CW_FINAL  0x1
+#define R_CW_BEGIN  0x2
+#define R_CW_NEXT   0x3
+#define R_CCW_BEGIN 0x4
+#define R_CCW_FINAL 0x5
+#define R_CCW_NEXT  0x6
+
+// Full-step state table: guarantees zero reverse steps during forward rotation, completely immune to mechanical contact bounce
+static const uint8_t PROGMEM encoder_table[7][4] = {
+  // R_START
+  {R_START,    R_CW_BEGIN,  R_CCW_BEGIN, R_START},
+  // R_CW_FINAL
+  {R_CW_NEXT,  R_START,     R_CW_FINAL,  R_START | DIR_CW},
+  // R_CW_BEGIN
+  {R_CW_NEXT,  R_CW_BEGIN,  R_START,     R_START},
+  // R_CW_NEXT
+  {R_CW_NEXT,  R_CW_BEGIN,  R_CW_FINAL,  R_START},
+  // R_CCW_BEGIN
+  {R_CCW_NEXT, R_START,     R_CCW_BEGIN, R_START},
+  // R_CCW_FINAL
+  {R_CCW_NEXT, R_CCW_FINAL, R_START,     R_START | DIR_CCW},
+  // R_CCW_NEXT
+  {R_CCW_NEXT, R_CCW_FINAL, R_CCW_BEGIN, R_START},
+};
+
+volatile uint8_t encState = R_START;
 volatile int8_t encDelta = 0;
-volatile uint8_t encLastState = 0;
 uint32_t lastBtnCheck = 0;
 bool lastBtnState = HIGH;
 uint32_t btnPressTime = 0;
@@ -138,17 +168,12 @@ uint8_t clickCount = 0;
 uint32_t lastClickRelease = 0;
 
 void IRAM_ATTR encoderISR() {
-  static uint32_t lastInterrupt = 0;
-  uint32_t now = micros();
-  if (now - lastInterrupt < 4000) return; // 4ms debounce ignores mechanical contact bounce
-  lastInterrupt = now;
-
-  // At FALLING edge of CLK:
-  // If DT is still HIGH -> Turned Clockwise (Seek Forward +)
-  // If DT is already LOW -> Turned Counter-Clockwise (Seek Backward -)
-  if (digitalRead(ENC_DT_PIN) == HIGH) {
+  uint8_t pinState = (digitalRead(ENC_CLK_PIN) << 1) | digitalRead(ENC_DT_PIN);
+  encState = pgm_read_byte(&encoder_table[encState & 0x0F][pinState]);
+  uint8_t result = encState & 0x30;
+  if (result == DIR_CW) {
     encDelta++;
-  } else {
+  } else if (result == DIR_CCW) {
     encDelta--;
   }
 }
@@ -1588,7 +1613,8 @@ void setup() {
   pinMode(ENC_CLK_PIN, INPUT_PULLUP);
   pinMode(ENC_DT_PIN, INPUT_PULLUP);
   pinMode(ENC_SW_PIN, INPUT_PULLUP);
-  attachInterrupt(digitalPinToInterrupt(ENC_CLK_PIN), encoderISR, FALLING);
+  attachInterrupt(digitalPinToInterrupt(ENC_CLK_PIN), encoderISR, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(ENC_DT_PIN), encoderISR, CHANGE);
 
   // Initialize hardware SPI and Adafruit display at 40MHz for flicker-free fast transfers
   spiBus.begin(TFT_SCK, -1, TFT_MOSI, TFT_CS);

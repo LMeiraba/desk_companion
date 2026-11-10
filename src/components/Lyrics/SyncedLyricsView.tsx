@@ -34,9 +34,10 @@ export const SyncedLyricsView: React.FC<SyncedLyricsViewProps> = ({ className = 
     setManualOffsetMs,
     fetchLyricsForTrack,
     updateProgress,
+    isPacedMode,
+    setIsPacedMode,
   } = useLyricsStore();
 
-  const [isPacedMode, setIsPacedMode] = useState(true);
   const displayLines = isPacedMode && pacedLines && pacedLines.length > 0 ? pacedLines : parsedLines;
   const currentActiveIndex = isPacedMode && pacedLines && pacedLines.length > 0 ? activePacedIndex : activeLineIndex;
 
