@@ -35,7 +35,6 @@ import { weatherService, WeatherData } from '../../services/weatherService';
 export const HardwareStudioView: React.FC = () => {
   const { playbackState, deckScreen: activeScreen, setDeckScreen: setActiveScreen } = usePlayerStore();
   const { parsedLines, activeLineIndex, isSynced } = useLyricsStore();
-  const { isBeatPulse } = useWindowsControlStore();
 
   const activeStream = parsedLines;
   const activeIndex = activeLineIndex;
@@ -523,32 +522,14 @@ export const HardwareStudioView: React.FC = () => {
           </div>
 
           <div
-            className={`relative rounded-[28px] p-3.5 bg-black border shadow-2xl flex flex-col overflow-hidden select-none ${
+            className={`relative rounded-[28px] p-3.5 bg-black border border-neutral-800 shadow-2xl flex flex-col overflow-hidden select-none ${
               orientation === 'portrait' ? 'w-[270px] h-[360px]' : 'w-[360px] h-[270px]'
             }`}
             style={{
-              borderColor: playbackState?.isPlaying
-                ? isBeatPulse
-                  ? dominantColor
-                  : `${dominantColor}70`
-                : '#262626',
-              boxShadow: playbackState?.isPlaying
-                ? `0 20px 45px -10px rgba(0,0,0,0.8), 0 0 ${isBeatPulse ? '42px' : '26px'} ${
-                    isBeatPulse ? '2px' : '-6px'
-                  } ${dominantColor}${isBeatPulse ? '75' : '35'}`
-                : `0 20px 45px -10px rgba(0,0,0,0.8), 0 0 20px -10px ${dominantColor}20`,
-              transform: isBeatPulse ? 'scale(1.008)' : 'scale(1)',
-              transition: isBeatPulse ? 'all 80ms cubic-bezier(0.1, 0.9, 0.2, 1)' : 'all 320ms ease-out',
+              borderColor: '#262626',
+              boxShadow: '0 20px 45px -10px rgba(0,0,0,0.8)',
             }}
           >
-            {/* Ambient Hardware-Calibrated Atmospheric Top Glow (Matches ESP32 drawAmbientTopGlow 75px) */}
-            <div
-              className="absolute top-0 left-0 right-0 h-[75px] pointer-events-none transition-all duration-700"
-              style={{
-                background: `linear-gradient(to bottom, ${dominantColor}30 0%, ${dominantColor}10 50%, transparent 100%)`,
-              }}
-            />
-
             {/* ANDROID-STYLE TOP STATUS BAR (Uniform across all screens) */}
             <div className="relative z-20 flex items-center justify-between px-1 pb-1.5 mb-1 text-[10px] font-mono border-b border-neutral-850/60 text-neutral-400 select-none">
               {/* Left: Connected Status Dot & Time */}

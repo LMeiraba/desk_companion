@@ -640,23 +640,9 @@ void drawCenteredText(const String& str, int y, uint8_t size, uint16_t color, ui
   tft.print(str);
 }
 
-// Ultra-fast atmospheric top glow using pre-interpolated line scanlines (takes < 6ms over SPI)
+// Top glow disabled: maintains pure deep black (#000000) matching simulator, prevents washing out status bar
 void drawAmbientTopGlow(uint16_t accentCol, int glowHeight = 80) {
-  int w = tft.width();
-  uint8_t r5 = (accentCol >> 11) & 0x1F;
-  uint8_t g6 = (accentCol >> 5) & 0x3F;
-  uint8_t b5 = accentCol & 0x1F;
-
-  for (int y = 0; y < glowHeight; y++) {
-    float t = 1.0f - ((float)y / (float)glowHeight);
-    float factor = 0.55f * t * t; // Calibrated quadratic falloff: visible rich ambient glow matching mockup
-    uint8_t curR = (uint8_t)(r5 * factor);
-    uint8_t curG = (uint8_t)(g6 * factor);
-    uint8_t curB = (uint8_t)(b5 * factor);
-    uint16_t lineCol = (curR << 11) | (curG << 5) | curB;
-    tft.drawFastHLine(0, y, w, lineCol);
-    if (y % 15 == 0) yield();
-  }
+  // Pure black background - no scanlines
 }
 
 // --- Android-Style Universal Top Status Bar ---
@@ -1033,33 +1019,57 @@ void drawClockView(bool forceRedraw = false) {
 }
 
 // --- Weather Screen View (Live API + DHT Sensor) ---
+static int lastDrawnWeatherTemp = -999;
+static String lastDrawnWeatherCond = "";
+static String lastDrawnWeatherCity = "";
+static float lastDrawnDHTTemp = -999.0f;
+static float lastDrawnDHTHum = -999.0f;
+
 void drawWeatherView(bool forceRedraw = false) {
   int w = tft.width();
   int h = tft.height();
 
   if (forceRedraw) {
     tft.fillRect(0, 16, w, h - 16, ILI9341_BLACK);
-    drawAmbientTopGlow(state.accentColor, 80);
+    lastDrawnWeatherTemp = -999;
+    lastDrawnWeatherCond = "";
+    lastDrawnWeatherCity = "";
+    lastDrawnDHTTemp = -999.0f;
+    lastDrawnDHTHum = -999.0f;
   }
 
   // Location / City
   int topY = (h >= 320) ? 42 : 22;
   String city = weatherState.city;
-  drawCenteredText(city, topY, 1, 0x8410, ILI9341_BLACK);
+  if (forceRedraw || city != lastDrawnWeatherCity) {
+    lastDrawnWeatherCity = city;
+    tft.fillRect(0, topY, w, 12, ILI9341_BLACK);
+    drawCenteredText(city, topY, 1, 0x8410, ILI9341_BLACK);
+  }
 
   // Large Outdoor Temperature
   int tempY = topY + 18;
-  String tempStr = String(weatherState.temp) + " C";
-  drawCenteredText(tempStr, tempY, 4, ILI9341_WHITE, ILI9341_BLACK);
+  if (forceRedraw || weatherState.temp != lastDrawnWeatherTemp) {
+    lastDrawnWeatherTemp = weatherState.temp;
+    tft.fillRect(0, tempY, w, 32, ILI9341_BLACK);
+    String tempStr = String(weatherState.temp) + " C";
+    drawCenteredText(tempStr, tempY, 4, ILI9341_WHITE, ILI9341_BLACK);
+  }
 
   // Condition (e.g. Partly Cloudy)
   int condY = tempY + 38;
-  drawCenteredText(weatherState.condition, condY, 1, state.accentColor, ILI9341_BLACK);
+  if (forceRedraw || weatherState.condition != lastDrawnWeatherCond) {
+    lastDrawnWeatherCond = weatherState.condition;
+    tft.fillRect(0, condY, w, 12, ILI9341_BLACK);
+    drawCenteredText(weatherState.condition, condY, 1, state.accentColor, ILI9341_BLACK);
+  }
 
   // Stats line (High, Low, Humidity)
   int statsY = condY + 18;
-  String stats = "H:" + String(weatherState.highTemp) + "  L:" + String(weatherState.lowTemp) + "  RH:" + String(weatherState.humidity) + "%";
-  drawCenteredText(stats, statsY, 1, 0x7BEF, ILI9341_BLACK);
+  if (forceRedraw) {
+    String stats = "H:" + String(weatherState.highTemp) + "  L:" + String(weatherState.lowTemp) + "  RH:" + String(weatherState.humidity) + "%";
+    drawCenteredText(stats, statsY, 1, 0x7BEF, ILI9341_BLACK);
+  }
 
   // Indoor DHT Sensor Card
   int cardW = w - 24;
@@ -1067,39 +1077,39 @@ void drawWeatherView(bool forceRedraw = false) {
   int cardX = 12;
   int cardY = (h >= 320) ? (h - cardH - 24) : (statsY + 24);
 
-  tft.fillRoundRect(cardX, cardY, cardW, cardH, 8, 0x10A2);
-  tft.drawRoundRect(cardX, cardY, cardW, cardH, 8, 0x2965);
+  if (forceRedraw) {
+    tft.fillRoundRect(cardX, cardY, cardW, cardH, 8, 0x10A2);
+    tft.drawRoundRect(cardX, cardY, cardW, cardH, 8, 0x2965);
 
-  tft.setTextSize(1);
-  tft.setTextColor(ILI9341_CYAN, 0x10A2);
-  tft.setCursor(cardX + 12, cardY + 10);
-  tft.print("INDOOR SENSOR (DHT-8)");
+    tft.setTextSize(1);
+    tft.setTextColor(ILI9341_CYAN, 0x10A2);
+    tft.setCursor(cardX + 12, cardY + 10);
+    tft.print("INDOOR SENSOR (DHT-8)");
 
-  tft.setTextColor(ILI9341_WHITE, 0x10A2);
-  tft.setCursor(cardX + 12, cardY + 26);
-  if (dhtSensor.valid) {
-    char dhtBuf[32];
-    snprintf(dhtBuf, sizeof(dhtBuf), "Temp: %.1f C  RH: %.0f%%", dhtSensor.temperature, dhtSensor.humidity);
-    tft.print(dhtBuf);
-  } else {
-    tft.print("DHT Sensor: Ready (GPIO 8)");
+    tft.setTextColor(0x7BEF, 0x10A2);
+    tft.setCursor(cardX + 12, cardY + 42);
+    tft.print("Ambient Room Climate");
   }
 
-  tft.setTextColor(0x7BEF, 0x10A2);
-  tft.setCursor(cardX + 12, cardY + 42);
-  tft.print("Ambient Room Climate");
+  if (forceRedraw || dhtSensor.temperature != lastDrawnDHTTemp || dhtSensor.humidity != lastDrawnDHTHum) {
+    lastDrawnDHTTemp = dhtSensor.temperature;
+    lastDrawnDHTHum = dhtSensor.humidity;
+    tft.fillRect(cardX + 10, cardY + 24, cardW - 20, 14, 0x10A2);
+    tft.setTextColor(ILI9341_WHITE, 0x10A2);
+    tft.setCursor(cardX + 12, cardY + 26);
+    if (dhtSensor.valid) {
+      char dhtBuf[32];
+      snprintf(dhtBuf, sizeof(dhtBuf), "Temp: %.1f C  RH: %.0f%%", dhtSensor.temperature, dhtSensor.humidity);
+      tft.print(dhtBuf);
+    } else {
+      tft.print("DHT Sensor: Ready (GPIO 8)");
+    }
+  }
 }
 
-// --- Discrete Standalone Mode Indicator Badge ---
+// Standalone mode is indicated natively by the Cyan status bar dot
 void drawStandaloneBadge() {
-  int w = tft.width();
-  bool wifiOk = (WiFi.status() == WL_CONNECTED);
-  uint16_t dotCol = wifiOk ? 0x2690 : 0xFD20; // soft green or amber
-  tft.fillCircle(w / 2 - 40, 12, 3, dotCol);
-  tft.setTextSize(1);
-  tft.setTextColor(0x7BEF, ILI9341_BLACK);
-  tft.setCursor(w / 2 - 32, 9);
-  tft.print(wifiOk ? "Standalone" : "Offline");
+  // Handled natively by drawStatusBar() - no duplicate drawings
 }
 
 // --- Native Notification Toast Popup ---
@@ -1441,7 +1451,6 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length
         if (w["highTemp"].is<int>()) weatherState.highTemp = w["highTemp"].as<int>();
         if (w["lowTemp"].is<int>()) weatherState.lowTemp = w["lowTemp"].as<int>();
         weatherState.valid = true;
-        if (state.screenMode == "weather") fullRedrawNeeded = true;
       }
 
       if (doc["screen"].is<String>()) {
@@ -1498,16 +1507,14 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length
         uint16_t newColor = parseColorToRGB565(doc["accentColor"].as<String>());
         if (newColor != state.accentColor) {
           state.accentColor = newColor;
-          fullRedrawNeeded = true;
+          if (state.screenMode == "lyrics" || state.screenMode == "now_playing") {
+            fullRedrawNeeded = true;
+          }
         }
       }
 
       if (doc["timeStr"].is<String>()) {
-        String newTime = doc["timeStr"].as<String>();
-        if (newTime != state.timeStr) {
-          state.timeStr = newTime;
-          if (state.screenMode == "clock") fullRedrawNeeded = true;
-        }
+        state.timeStr = doc["timeStr"].as<String>();
       }
 
       if (doc["dateStr"].is<String>()) {
@@ -1964,18 +1971,17 @@ void loop() {
       if (state.screenMode == "weather") {
         if (fullRedrawNeeded) {
           drawWeatherView(true);
-          drawStandaloneBadge();
           fullRedrawNeeded = false;
+        } else {
+          drawWeatherView(false);
         }
       } else {
         // Default Standalone Desk Clock
         if (fullRedrawNeeded) {
           drawClockView(true);
-          drawStandaloneBadge();
           fullRedrawNeeded = false;
         } else {
           drawClockView(false);
-          drawStandaloneBadge();
         }
       }
     } else {
@@ -1997,6 +2003,8 @@ void loop() {
         if (fullRedrawNeeded) {
           drawWeatherView(true);
           fullRedrawNeeded = false;
+        } else {
+          drawWeatherView(false);
         }
       } else { // "lyrics" mode
         if (fullRedrawNeeded) {
