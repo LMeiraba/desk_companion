@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>2.8" TFT Full 240x320 Breadboard Alignment</title>
+  <style>
+    body {
+      background: #141419;
+      color: #fff;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 30px;
+      margin: 0;
+    }
+    h1 {
+      margin-bottom: 6px;
+      font-size: 22px;
+      color: #58a6ff;
+    }
+    p.subtitle {
+      color: #8b949e;
+      margin-top: 0;
+      margin-bottom: 24px;
+      font-size: 14px;
+    }
+    .pcb-container {
+      background: #b22222;
+      border: 4px solid #781414;
+      border-radius: 8px;
+      padding: 20px 16px 20px 16px;
+      box-shadow: 0 16px 40px rgba(0,0,0,0.7);
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .header-label {
+      font-size: 11px;
+      color: #fbd38d;
+      font-weight: bold;
+      margin-bottom: 8px;
+      letter-spacing: 1px;
+    }
+    .pin-header {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 14px;
+    }
+    .pin {
+      width: 10px;
+      height: 10px;
+      background: #d4af37;
+      border: 1px solid #997d1e;
+      border-radius: 50%;
+    }
+    .tft-screen {
+      width: 240px;
+      height: 320px;
+      background: #000;
+      border: 2px solid #fff;
+      position: relative;
+      overflow: hidden;
+      box-sizing: border-box;
+    }
+    .outer-border {
+      position: absolute;
+      top: 1px; left: 1px; right: 1px; bottom: 1px;
+      border: 1px solid #008b8b;
+    }
+    .corner {
+      position: absolute;
+      width: 16px; height: 16px;
+    }
+    .c-tl { top: 3px; left: 3px; background: #ff0000; }
+    .c-tr { top: 3px; right: 3px; background: #0000ff; }
+    .c-bl { bottom: 3px; left: 3px; background: #00ff00; }
+    .c-br { bottom: 3px; right: 3px; background: #ffff00; }
+
+    .header-banner {
+      position: absolute;
+      top: 22px; left: 22px; right: 22px;
+      height: 30px;
+      background: #000080;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+      font-weight: bold;
+    }
+    .specs {
+      position: absolute;
+      top: 60px; left: 16px;
+      font-size: 9px;
+      color: #00ff00;
+      line-height: 14px;
+    }
+    .swatches-box {
+      position: absolute;
+      top: 94px; left: 16px; right: 16px;
+      height: 42px;
+      border: 1px solid #555;
+      display: flex;
+      align-items: center;
+      justify-content: space-around;
+    }
+    .swatch { width: 38px; height: 30px; border-radius: 2px; }
+    .sw-r { background: #ff0000; }
+    .sw-g { background: #00ff00; }
+    .sw-b { background: #0000ff; }
+    .sw-m { background: #ff00ff; }
+
+    .hw-card {
+      position: absolute;
+      top: 146px; left: 16px; right: 16px;
+      height: 70px;
+      border: 1px solid #0000ff;
+      border-radius: 4px;
+      overflow: hidden;
+      font-size: 8.5px;
+    }
+    .hw-title {
+      background: #000080;
+      padding: 3px 8px;
+      color: #00ffff;
+      font-weight: bold;
+    }
+    .hw-body {
+      padding: 5px 8px;
+      line-height: 14px;
+      color: #fff;
+    }
+
+    .uptime-box {
+      position: absolute;
+      top: 226px; left: 16px; right: 16px;
+      height: 28px;
+      border: 1px solid #fff;
+      display: flex;
+      align-items: center;
+      padding-left: 8px;
+      color: #ffff00;
+      font-size: 9.5px;
+      font-weight: bold;
+    }
+
+    .bot-banner {
+      position: absolute;
+      top: 266px; left: 16px; right: 16px;
+      height: 30px;
+      background: #006400;
+      border: 1px solid #ffff00;
+      color: #fff;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      padding-left: 8px;
+      font-size: 8.5px;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>2.8" TFT Full Screen Verification ($240 \times 320$)</h1>
+  <p class="subtitle">Screen as plugged into breadboard (Pins at Top). 100% of physical glass active.</p>
+
+  <div class="pcb-container">
+    <div class="header-label">&blacktriangle; 14-PIN HEADER (PINS AT TOP) &blacktriangle;</div>
+    <div class="pin-header">
+      <div class="pin" title="1: VCC"></div>
+      <div class="pin" title="2: GND"></div>
+      <div class="pin" title="3: CS"></div>
+      <div class="pin" title="4: RESET"></div>
+      <div class="pin" title="5: DC"></div>
+      <div class="pin" title="6: MOSI"></div>
+      <div class="pin" title="7: SCK"></div>
+      <div class="pin" title="8: LED"></div>
+      <div class="pin" title="9: MISO"></div>
+      <div class="pin" title="10: T_CLK"></div>
+      <div class="pin" title="11: T_CS"></div>
+      <div class="pin" title="12: T_DIN"></div>
+      <div class="pin" title="13: T_DO"></div>
+      <div class="pin" title="14: T_IRQ"></div>
+    </div>
+
+    <div class="tft-screen">
+      <div class="outer-border"></div>
+      <!-- 4 Corners -->
+      <div class="corner c-tl" title="Top-Left (Red)"></div>
+      <div class="corner c-tr" title="Top-Right (Blue)"></div>
+      <div class="corner c-bl" title="Bottom-Left (Green)"></div>
+      <div class="corner c-br" title="Bottom-Right (Yellow)"></div>
+
+      <div class="header-banner">DESK COMPANION</div>
+
+      <div class="specs">
+        <div>ORIENTATION: PINS AT TOP</div>
+        <div>RESOLUTION:  240 x 320 (FULL)</div>
+      </div>
+
+      <div class="swatches-box">
+        <div class="swatch sw-r"></div>
+        <div class="swatch sw-g"></div>
+        <div class="swatch sw-b"></div>
+        <div class="swatch sw-m"></div>
+      </div>
+
+      <div class="hw-card">
+        <div class="hw-title">CONFIRMED WIRING:</div>
+        <div class="hw-body">
+          <div>SCK: GPIO 4 &nbsp;|&nbsp; MOSI: GPIO 6</div>
+          <div>DC: &nbsp;GPIO 7 &nbsp;|&nbsp; CS: &nbsp; GPIO 5</div>
+          <div>LED: GPIO 10 &nbsp;|&nbsp; RST: &nbsp;3.3V Rail</div>
+        </div>
+      </div>
+
+      <div class="uptime-box">Uptime: <span id="sec">5</span> sec | Live Heartbeat</div>
+
+      <div class="bot-banner">
+        <div style="font-weight:bold; color:#00ff00;">BOTTOM EDGE ACTIVE: Y=320</div>
+        <div>Old Ghost Pixels Cleared!</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let s = 5;
+    setInterval(() => {
+      s++;
+      document.getElementById('sec').innerText = s;
+    }, 1000);
+  </script>
+</body>
+</html>

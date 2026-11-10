@@ -1,0 +1,42 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Rust / Tauri build artifacts
+src-tauri/target/
+target/
+
+# PlatformIO / Embedded build artifacts
+firmware/.pio/
+.pio/
+firmware/.vscode/.browse.c_cpp.db*
+
+# Environment, secrets, and cached user auth sessions
+.env
+.env*.local
+*.pem
+*.key
+*auth_session*.json
+.spotify_auth_session.json
+src-tauri/.spotify_auth_session.json
