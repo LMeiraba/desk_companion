@@ -1171,7 +1171,7 @@ void drawKnobSwitcherMenu() {
 void drawLyricsView(bool forceRedraw = false) {
   int w = tft.width();
   int h = tft.height();
-  int lyricsTop = 58;
+  int lyricsTop = 56; // Matches header bottom (16+40=56) - zero ghost scanlines
   int footerTop = h - 34;
   int lyricsHeight = footerTop - lyricsTop;
   int centerY = lyricsTop + lyricsHeight / 2 + localScrollOffset;
@@ -1268,6 +1268,8 @@ void drawFooter(bool forceRedraw = false) {
 
   int currentSec = currentMs / 1000;
 
+  static uint32_t lastDrawnTotalMs = 0xFFFFFFFF;
+
   // Static full redraw on track transition or orientation switch
   if (forceRedraw) {
     tft.fillRect(0, footerY, w, 34, ILI9341_BLACK);
@@ -1287,6 +1289,7 @@ void drawFooter(bool forceRedraw = false) {
 
     lastDrawnFillW = fillW;
     lastDrawnSec = currentSec;
+    lastDrawnTotalMs = state.durationMs;
     return;
   }
 
@@ -1307,11 +1310,22 @@ void drawFooter(bool forceRedraw = false) {
   // Differential update: ONLY redraw elapsed time text if the second changed
   if (currentSec != lastDrawnSec) {
     lastDrawnSec = currentSec;
-    tft.fillRect(barX, footerY + 16, 40, 10, ILI9341_BLACK); // Clean wipe to eliminate ghost digits!
+    tft.fillRect(barX, footerY + 14, 42, 14, ILI9341_BLACK); // Clean wipe to eliminate ghost digits!
     tft.setTextSize(1);
     tft.setTextColor(0xAD55, ILI9341_BLACK);
     tft.setCursor(barX, footerY + 16);
     tft.print(formatTime(currentMs));
+  }
+
+  // Differential update: wipe and refresh total time if duration changed (e.g. from LIVE/0:01 to actual track length)
+  if (state.durationMs != lastDrawnTotalMs) {
+    lastDrawnTotalMs = state.durationMs;
+    tft.fillRect(barX + barW - 48, footerY + 14, 52, 14, ILI9341_BLACK);
+    String totalStr = state.durationMs > 1000 ? formatTime(state.durationMs) : "LIVE";
+    tft.setTextSize(1);
+    tft.setTextColor(0x7BEF, ILI9341_BLACK);
+    tft.setCursor(barX + barW - totalStr.length() * 6, footerY + 16);
+    tft.print(totalStr);
   }
 }
 
@@ -2025,9 +2039,16 @@ void loop() {
       }
     }
 
-    // Active Notification Toast Overlay
-    if (millis() < notifExpireTime) {
+    // Active Notification Toast Overlay & Clean Expiration Wipe
+    static bool notifWasActive = false;
+    if (millis() < notifExpireTime && notifTitle.length() > 0) {
       drawNotificationToast();
+      notifWasActive = true;
+    } else if (notifWasActive) {
+      notifWasActive = false;
+      notifTitle = "";
+      notifBody = "";
+      fullRedrawNeeded = true;
     }
   }
 

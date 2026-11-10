@@ -42,6 +42,32 @@ class WeatherService {
   private lastFetched = 0;
   private isFetching = false;
 
+  public resetCache(): void {
+    this.lastFetched = 0;
+  }
+
+  public async searchCity(query: string): Promise<{ city: string; lat: number; lon: number } | null> {
+    const trimmed = query.trim();
+    if (!trimmed) return null;
+    try {
+      const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(trimmed)}&count=1&language=en&format=json`;
+      const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
+      if (!res.ok) return null;
+      const data = await res.json();
+      if (data.results && data.results.length > 0) {
+        const first = data.results[0];
+        return {
+          city: first.name || trimmed,
+          lat: first.latitude,
+          lon: first.longitude,
+        };
+      }
+    } catch (err) {
+      console.warn('[WeatherService] Geocoding failed:', err);
+    }
+    return null;
+  }
+
   public async getWeather(): Promise<WeatherData> {
     const now = Date.now();
     // Cache for 15 minutes
@@ -53,23 +79,38 @@ class WeatherService {
     this.isFetching = true;
 
     try {
-      // 1. Get approximate coordinates & city from IP (fast, zero permission prompt)
       let lat = 12.9716;
       let lon = 77.5946;
       let city = 'Local Weather';
 
-      try {
-        const ipRes = await fetch('https://ipapi.co/json/', { signal: AbortSignal.timeout(4000) });
-        if (ipRes.ok) {
-          const ipData = await ipRes.json();
-          if (ipData.latitude && ipData.longitude) {
-            lat = ipData.latitude;
-            lon = ipData.longitude;
-            city = ipData.city || ipData.region || 'Local';
+      // 1. Check user-configured custom location or GPS from localStorage
+      const savedLoc = localStorage.getItem('weather_custom_loc');
+      if (savedLoc) {
+        try {
+          const parsed = JSON.parse(savedLoc);
+          if (parsed.lat && parsed.lon) {
+            lat = parsed.lat;
+            lon = parsed.lon;
+            city = parsed.city || 'Custom';
           }
+        } catch {
+          // Ignore
         }
-      } catch {
-        // Fallback coordinates default
+      } else {
+        // Fall back to approximate coordinates & city from IP (fast, zero permission prompt)
+        try {
+          const ipRes = await fetch('https://ipapi.co/json/', { signal: AbortSignal.timeout(4000) });
+          if (ipRes.ok) {
+            const ipData = await ipRes.json();
+            if (ipData.latitude && ipData.longitude) {
+              lat = ipData.latitude;
+              lon = ipData.longitude;
+              city = ipData.city || ipData.region || 'Local';
+            }
+          }
+        } catch {
+          // Fallback coordinates default
+        }
       }
 
       // 2. Fetch live weather from Open-Meteo (free, public API, no key required)

@@ -16,6 +16,7 @@ import { DevicePicker } from './components/Devices/DevicePicker';
 import { LoginModal } from './components/Auth/LoginModal';
 import { SyncedLyricsView } from './components/Lyrics/SyncedLyricsView';
 import { MiniPlayerModal } from './components/MiniPlayer/MiniPlayerModal';
+import { hardwareWs } from './services/hardwareWs';
 
 import { getCurrentWindow, PhysicalPosition, PhysicalSize } from '@tauri-apps/api/window';
 
@@ -166,6 +167,11 @@ export const App: React.FC = () => {
               onToggleLyrics={() => {
                 setActiveTab('spotify');
                 setIsLyricsModalOpen(false);
+                usePlayerStore.getState().setDeckScreen('lyrics');
+                localStorage.setItem('dc_deck_screen', 'lyrics');
+                if (hardwareWs.getIsConnected()) {
+                  hardwareWs.sendConfig({ type: 'set_screen', screen: 'lyrics' });
+                }
               }}
               onToggleMiniPlayer={() => setIsMiniPlayerOpen(!isMiniPlayerOpen)}
             />

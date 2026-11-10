@@ -75,6 +75,6 @@ export const FOOTER_H      = 34;   // progress bar footer
 export const FOOTER_TOP    = DISPLAY_H - FOOTER_H;  // = 286
 
 // Lyrics view vertical zones
-export const LYRICS_TOP    = 58;   // below header (16+40=56, then 2px gap)
+export const LYRICS_TOP    = 56;   // below header (16+40=56) - zero scanline gap
 export const LYRICS_BOTTOM = FOOTER_TOP;  // = 286
-export const LYRICS_H      = LYRICS_BOTTOM - LYRICS_TOP;  // = 228
+export const LYRICS_H      = LYRICS_BOTTOM - LYRICS_TOP;  // = 230
