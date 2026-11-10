@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { usePlayerStore } from '../../stores/usePlayerStore';
 import { useLyricsStore } from '../../stores/useLyricsStore';
 import { controlRouter } from '../../services/controlRouter';
-import { extractDominantColor } from '../../services/dominantColor';
+import { extractDominantColor, generateThumbnailRGB565Base64 } from '../../services/dominantColor';
 import { hardwareWs } from '../../services/hardwareWs';
 import { tauriIpc } from '../../services/tauriIpc';
 import { HotspotStatus } from '../../types/models';
@@ -13,24 +13,23 @@ import {
   Volume2,
   VolumeX,
   FastForward,
-  Layers,
   Wifi,
   WifiOff,
   Radio,
-  Music2,
   Check,
   Settings,
-  ExternalLink,
-  X,
-  Send,
+  CloudSun,
+  Layers,
+  Timer,
   Play,
   Pause,
-  Timer,
-  CloudSun,
-  Thermometer,
-  Bell,
+  X,
+  Send,
+  ExternalLink,
 } from 'lucide-react';
 import { weatherService, WeatherData } from '../../services/weatherService';
+import { buildScene, renderToCanvas, DisplayState } from '../../services/displayRenderer';
+import { DISPLAY_W, DISPLAY_H } from '../../services/displayConstants';
 
 export const HardwareStudioView: React.FC = () => {
   const { playbackState, deckScreen: activeScreen, setDeckScreen: setActiveScreen } = usePlayerStore();
@@ -132,6 +131,11 @@ export const HardwareStudioView: React.FC = () => {
   // Dynamic Accent Color
   const [dominantColor, setDominantColor] = useState('#10b981');
 
+  // --- Canvas mockup ref + RGB565 album thumbnail state ---
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const albumBitmapRef = useRef<Uint16Array | null>(null);
+  const lastArtUrlRef  = useRef<string>('');
+
   // WebSocket / mDNS Connection
   const [mDnsAddress, setMDnsAddress] = useState(
     () => localStorage.getItem('hardware_esp32_address') || '10.26.152.127'
@@ -220,15 +224,32 @@ export const HardwareStudioView: React.FC = () => {
     : playbackState?.track;
 
   const track = activeTrack;
-  const currentProgress = playbackState?.progressMs || 0;
-  const duration = playbackState?.durationMs || 1000;
+  const currentProgress = useWinMedia && winMedia
+    ? (winMedia.progressMs ?? 0)
+    : (playbackState?.progressMs || 0);
+  const duration = useWinMedia && winMedia
+    ? (winMedia.durationMs ?? 0)
+    : (playbackState?.durationMs || 0);
   const volumePercent = playbackState?.device?.volumePercent ?? 50;
 
-  // Extract Dominant Color on track change
+  // Extract Dominant Color + 32×32 RGB565 bitmap on track change
   useEffect(() => {
-    if (track?.albumArtUrl) {
+    if (track?.albumArtUrl && track.albumArtUrl !== lastArtUrlRef.current) {
+      lastArtUrlRef.current = track.albumArtUrl;
       extractDominantColor(track.albumArtUrl).then((color) => {
         setDominantColor(color);
+      });
+      generateThumbnailRGB565Base64(track.albumArtUrl, 32).then((b64) => {
+        if (!b64) { albumBitmapRef.current = null; return; }
+        // Decode base64 → Uint16Array of 32×32 RGB565 pixels
+        const binary = atob(b64);
+        const bytes  = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+        const pixels = new Uint16Array(32 * 32);
+        for (let i = 0; i < pixels.length; i++) {
+          pixels[i] = (bytes[i * 2] << 8) | bytes[i * 2 + 1];
+        }
+        albumBitmapRef.current = pixels;
       });
     }
   }, [track?.albumArtUrl]);
@@ -252,6 +273,71 @@ export const HardwareStudioView: React.FC = () => {
     });
     return unsub;
   }, []);
+
+  // Unified Display Renderer Effect (Direct 1:1 Pixel Parity with ILI9341 Hardware)
+  useEffect(() => {
+    if (!canvasRef.current) return;
+
+    const curLyric =
+      activeIndex >= 0 && activeStream[activeIndex]?.text
+        ? activeStream[activeIndex].text
+        : isSynced
+        ? '♪ Instrumental ♪'
+        : '';
+    const prevLyric = activeIndex > 0 ? activeStream[activeIndex - 1]?.text || '' : '';
+    const nextLyric = activeIndex + 1 < activeStream.length ? activeStream[activeIndex + 1]?.text || '' : '';
+
+    const displayState: DisplayState = {
+      screenMode: activeScreen,
+      trackName: track?.name || 'No Track Playing',
+      artistName: track?.artists?.[0] || 'Desk Companion',
+      isPlaying: playbackState?.isPlaying ?? false,
+      progressMs: currentProgress,
+      durationMs: duration,
+      accentHex: dominantColor,
+      currentLyric: curLyric,
+      prevLyric: prevLyric,
+      nextLyric: nextLyric,
+      hasLyrics: (activeStream && activeStream.length > 0) || isSynced,
+      timeStr: liveClock.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true }).toLowerCase(),
+      dateStr: liveClock.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' }).toUpperCase(),
+      weatherTemp: liveWeather?.temp ?? 24,
+      weatherCond: liveWeather?.condition || 'Partly Cloudy',
+      weatherCity: liveWeather?.city || 'Local Area',
+      weatherHigh: liveWeather?.highTemp ?? 28,
+      weatherLow: liveWeather?.lowTemp ?? 18,
+      weatherHum: liveWeather?.humidity ?? 50,
+      weatherValid: Boolean(liveWeather),
+      dhtTemp: 24.5,
+      dhtHum: 52,
+      dhtValid: true,
+      wifiRssi: isConnected ? -55 : -120,
+      clientConnected: isConnected,
+      albumBitmap: albumBitmapRef.current,
+      notifTitle: activeNotification?.title,
+      notifBody: activeNotification?.body,
+      notifActive: Boolean(activeNotification),
+    };
+
+    const cmds = buildScene(displayState);
+    renderToCanvas(cmds, canvasRef.current);
+  }, [
+    activeScreen,
+    track?.name,
+    track?.artists,
+    track?.albumArtUrl,
+    playbackState?.isPlaying,
+    currentProgress,
+    duration,
+    dominantColor,
+    activeStream,
+    activeIndex,
+    isSynced,
+    liveClock,
+    liveWeather,
+    isConnected,
+    activeNotification,
+  ]);
 
   const handleConnectToggle = () => {
     if (isConnected) {
@@ -522,7 +608,7 @@ export const HardwareStudioView: React.FC = () => {
           </div>
 
           <div
-            className={`relative rounded-[28px] p-3.5 bg-black border border-neutral-800 shadow-2xl flex flex-col overflow-hidden select-none ${
+            className={`relative rounded-[28px] p-3.5 bg-black border border-neutral-800 shadow-2xl flex items-center justify-center overflow-hidden select-none ${
               orientation === 'portrait' ? 'w-[270px] h-[360px]' : 'w-[360px] h-[270px]'
             }`}
             style={{
@@ -530,215 +616,18 @@ export const HardwareStudioView: React.FC = () => {
               boxShadow: '0 20px 45px -10px rgba(0,0,0,0.8)',
             }}
           >
-            {/* ANDROID-STYLE TOP STATUS BAR (Uniform across all screens) */}
-            <div className="relative z-20 flex items-center justify-between px-1 pb-1.5 mb-1 text-[10px] font-mono border-b border-neutral-850/60 text-neutral-400 select-none">
-              {/* Left: Connected Status Dot & Time */}
-              <div className="flex items-center gap-1.5 font-bold text-neutral-200">
-                <span
-                  className={`w-1.5 h-1.5 rounded-full ${
-                    isConnected ? 'bg-emerald-400 animate-pulse' : 'bg-cyan-400'
-                  }`}
-                />
-                <span>
-                  {liveClock.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: false })}
-                </span>
-              </div>
-
-              {/* Right: Weather & Wi-Fi Strength */}
-              <div className="flex items-center gap-2">
-                <div className="flex items-center gap-1 text-neutral-300">
-                  <CloudSun className="w-3 h-3 text-amber-400" />
-                  <span className="font-semibold">{liveWeather?.temp ?? 24}°C</span>
-                </div>
-                <div className="flex items-center gap-0.5 text-emerald-400">
-                  <Wifi className="w-3 h-3" />
-                </div>
-              </div>
-            </div>
-
-            {/* SCREEN CONTENT 1: SYNCED LYRICS (PORTRAIT) */}
-            {activeScreen === 'lyrics' && (
-              <div className="relative z-10 flex-1 flex flex-col justify-between py-1 px-1 text-center">
-                {/* Mini Top Track Bar with Album Art */}
-                <div className="flex items-center justify-between pb-2 border-b border-neutral-850">
-                  <div className="flex items-center gap-2 min-w-0 pr-2">
-                    {track?.albumArtUrl ? (
-                      <img
-                        src={track.albumArtUrl}
-                        alt="Art"
-                        className="w-8 h-8 rounded-lg object-cover border shrink-0"
-                        style={{ borderColor: dominantColor }}
-                      />
-                    ) : (
-                      <div className="w-8 h-8 rounded-lg bg-neutral-900 border border-neutral-850 flex items-center justify-center shrink-0">
-                        <Music2 className="w-4 h-4" style={{ color: dominantColor }} />
-                      </div>
-                    )}
-                    <div className="text-left min-w-0">
-                      <p className="text-[11px] font-bold text-neutral-200 truncate">{track?.name || 'No Song'}</p>
-                      <p className="text-[9px] text-neutral-400 truncate">{track?.artists?.[0] || 'Idle'}</p>
-                    </div>
-                  </div>
-                  <span
-                    className="text-[9px] px-1.5 py-0.5 rounded font-mono font-bold border shrink-0"
-                    style={{
-                      borderColor: dominantColor,
-                      color: dominantColor,
-                      backgroundColor: `${dominantColor}20`,
-                    }}
-                  >
-                    LRC
-                  </span>
-                </div>
-
-                {/* 3-Line Vertical Lyrics Scroller */}
-                <div className="flex-1 flex flex-col justify-center space-y-3 py-2 overflow-hidden">
-                  {/* Past line */}
-                  <p className="text-[11px] text-neutral-500 truncate transition-all duration-300">
-                    {activeIndex > 0 && activeStream[activeIndex - 1]?.text}
-                  </p>
-
-                  {/* Active Live Line */}
-                  <div className="py-2 px-3 rounded-xl bg-neutral-900/60 border border-neutral-800">
-                    <p
-                      className="text-sm font-extrabold leading-snug tracking-tight drop-shadow-md transition-all duration-200"
-                      style={{ color: dominantColor }}
-                    >
-                      {activeIndex >= 0 && activeStream[activeIndex]?.text
-                        ? activeStream[activeIndex].text
-                        : isSynced
-                        ? '♪ Instrumental ♪'
-                        : 'No Synced Lyrics'}
-                    </p>
-                  </div>
-
-                  {/* Next line */}
-                  <p className="text-[11px] text-neutral-500 truncate transition-all duration-300">
-                    {activeIndex + 1 < activeStream.length && activeStream[activeIndex + 1]?.text}
-                  </p>
-                </div>
-
-                {/* Bottom Progress Bar */}
-                <div className="pt-2 border-t border-neutral-850">
-                  <div className="w-full h-1 bg-neutral-800 rounded-full overflow-hidden mb-1">
-                    <div
-                      className="h-full rounded-full transition-all duration-300"
-                      style={{
-                        width: `${duration > 0 ? (currentProgress / duration) * 100 : 0}%`,
-                        backgroundColor: dominantColor,
-                      }}
-                    />
-                  </div>
-                  <div className="flex justify-between text-[9px] font-mono text-neutral-400">
-                    <span>{Math.floor(currentProgress / 60000)}:{String(Math.floor((currentProgress % 60000) / 1000)).padStart(2, '0')}</span>
-                    <span>{duration > 1000 ? `${Math.floor(duration / 60000)}:${String(Math.floor((duration % 60000) / 1000)).padStart(2, '0')}` : 'LIVE'}</span>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* SCREEN CONTENT 2: NOW PLAYING */}
-            {activeScreen === 'now_playing' && (
-              <div className="relative z-10 flex-1 flex flex-col items-center justify-between py-2 text-center">
-                <div className="w-36 h-36 rounded-2xl overflow-hidden shadow-xl border border-neutral-800 mx-auto my-auto mt-2">
-                  <img
-                    src={track?.albumArtUrl || '/placeholder.png'}
-                    alt={track?.name}
-                    className="w-full h-full object-cover"
-                  />
-                </div>
-
-                <div className="w-full px-2 mt-2">
-                  <h4 className="text-xs font-extrabold text-neutral-100 truncate">{track?.name || 'No Track'}</h4>
-                  <p className="text-[10px] text-neutral-400 truncate mt-0.5">{track?.artists?.join(', ')}</p>
-                </div>
-
-                <div className="w-full px-2 mt-3">
-                  <div className="w-full h-1 bg-neutral-800 rounded-full overflow-hidden mb-1">
-                    <div
-                      className="h-full rounded-full"
-                      style={{
-                        width: `${duration > 0 ? (currentProgress / duration) * 100 : 0}%`,
-                        backgroundColor: dominantColor,
-                      }}
-                    />
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* SCREEN CONTENT 3: CLOCK & DESK STATUS */}
-            {activeScreen === 'clock' && (
-              <div className="relative z-10 flex-1 flex flex-col justify-between py-4 text-center">
-                <div className="space-y-1 mt-6">
-                  <h3 className="text-4xl font-extrabold font-mono tracking-tighter text-neutral-100">
-                    {liveClock.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true }).toLowerCase()}
-                  </h3>
-                  <p className="text-[10px] uppercase font-mono tracking-wider text-neutral-500">
-                    {liveClock.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' }).toUpperCase()}
-                  </p>
-                </div>
-
-                <div className="p-3 bg-neutral-900/80 rounded-2xl border border-neutral-800 text-left">
-                  <div className="flex items-center gap-2 mb-1">
-                    <Music2 className="w-3 h-3 text-emerald-400" />
-                    <span className="text-[10px] font-bold text-neutral-300 truncate">{track?.name || 'Idle'}</span>
-                  </div>
-                  <p className="text-[9px] text-neutral-500 truncate">{track?.artists?.join(', ')}</p>
-                </div>
-              </div>
-            )}
-
-            {/* SCREEN CONTENT 4: WEATHER & SENSOR VIEW */}
-            {activeScreen === 'weather' && (
-              <div className="relative z-10 flex-1 flex flex-col justify-between py-2 text-center animate-in fade-in">
-                <div className="mt-2 space-y-1">
-                  <div className="flex items-center justify-center gap-1.5 text-neutral-400">
-                    <CloudSun className="w-3.5 h-3.5 text-amber-400" />
-                    <span className="text-[11px] font-bold uppercase tracking-wider">{liveWeather?.city || 'Local Weather'}</span>
-                  </div>
-                  <h3 className="text-4xl font-extrabold font-mono tracking-tighter text-white mt-1">
-                    {liveWeather?.temp ?? 24}°C
-                  </h3>
-                  <p className="text-[11px] font-medium font-mono text-emerald-400">
-                    {liveWeather?.condition || 'Partly Cloudy'}
-                  </p>
-                  <div className="flex justify-center gap-3 text-[10px] text-neutral-400 font-mono mt-1">
-                    <span>H: {liveWeather?.highTemp ?? 28}°</span>
-                    <span>L: {liveWeather?.lowTemp ?? 18}°</span>
-                    <span>RH: {liveWeather?.humidity ?? 50}%</span>
-                  </div>
-                </div>
-
-                {/* Indoor DHT Sensor Card */}
-                <div className="p-2.5 bg-neutral-900/90 rounded-2xl border border-neutral-800 text-left mb-1">
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-[10px] font-bold text-neutral-300 flex items-center gap-1.5">
-                      <Thermometer className="w-3 h-3 text-cyan-400" />
-                      Indoor Sensor (DHT-8)
-                    </span>
-                    <span className="text-[9px] px-1.5 py-0.2 rounded bg-cyan-950/80 border border-cyan-800/50 text-cyan-400 font-mono">
-                      GPIO 8
-                    </span>
-                  </div>
-                  <div className="flex justify-between items-center text-[10px] font-mono text-neutral-200 mt-1">
-                    <span>Temp: <strong className="text-white">24.5°C</strong></span>
-                    <span>Humidity: <strong className="text-cyan-400">52%</strong></span>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Notification Toast Alert Overlay */}
-            {activeNotification && (
-              <div className="absolute top-2 left-2 right-2 z-40 p-2.5 rounded-xl bg-neutral-900/95 border border-emerald-500/50 shadow-2xl animate-in slide-in-from-top-3 duration-300">
-                <div className="flex items-center gap-2 mb-0.5">
-                  <Bell className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                  <span className="text-[11px] font-bold text-neutral-100 truncate">{activeNotification.title}</span>
-                </div>
-                <p className="text-[9px] text-neutral-300 line-clamp-2 pl-5.5">{activeNotification.body}</p>
-              </div>
-            )}
+            {/* Unified Canvas Mockup (100% Exact 240x320 ILI9341 Pixel Parity) */}
+            <canvas
+              ref={canvasRef}
+              width={DISPLAY_W}
+              height={DISPLAY_H}
+              className="rounded-lg shadow-inner bg-black"
+              style={{
+                width: orientation === 'portrait' ? '240px' : '320px',
+                height: orientation === 'portrait' ? '320px' : '240px',
+                imageRendering: 'pixelated',
+              }}
+            />
 
             {/* Overlay Mode Feedback Badge (Triggered when knob is turned) */}
             {modePopup && (

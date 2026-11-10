@@ -1281,7 +1281,7 @@ void drawFooter(bool forceRedraw = false) {
     tft.setCursor(barX, footerY + 16);
     tft.print(formatTime(currentMs));
 
-    String totalStr = formatTime(state.durationMs);
+    String totalStr = state.durationMs > 1000 ? formatTime(state.durationMs) : "LIVE";
     tft.setCursor(barX + barW - totalStr.length() * 6, footerY + 16);
     tft.print(totalStr);
 

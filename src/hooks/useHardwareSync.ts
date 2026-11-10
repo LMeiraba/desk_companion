@@ -81,12 +81,25 @@ export function useHardwareSync() {
     const broadcast = () => {
       const now = Date.now();
       const isSpotifyPlayingNow = playbackState?.isPlaying ?? false;
-      const progressMs = usePlayerStore.getState().getSmoothProgressMs();
-      const durationMs = playbackState?.durationMs ?? 1000;
-      const volumePercent = playbackState?.device?.volumePercent ?? 50;
-
       const currentWinMedia = useWindowsControlStore.getState().windowsMedia;
       const currentUseWinMedia = !isSpotifyPlayingNow && Boolean(currentWinMedia?.isPlaying && currentWinMedia?.title?.trim());
+
+      let progressMs = 0;
+      let durationMs = 0;
+      if (currentUseWinMedia && currentWinMedia) {
+        progressMs = currentWinMedia.progressMs ?? 0;
+        if (currentWinMedia.isPlaying && currentWinMedia.timestamp > 0) {
+          progressMs += Math.max(0, now - currentWinMedia.timestamp);
+        }
+        durationMs = currentWinMedia.durationMs ?? 0;
+        if (durationMs > 0 && progressMs > durationMs) {
+          progressMs = durationMs;
+        }
+      } else {
+        progressMs = usePlayerStore.getState().getSmoothProgressMs();
+        durationMs = playbackState?.durationMs ?? 0;
+      }
+      const volumePercent = playbackState?.device?.volumePercent ?? 50;
 
       const trackTitle = currentUseWinMedia && currentWinMedia ? currentWinMedia.title : (playbackState?.track?.name || 'Desk Companion');
       const artistTitle = currentUseWinMedia && currentWinMedia ? (currentWinMedia.artist || currentWinMedia.source.toUpperCase()) : (playbackState?.track?.artists?.join(', ') || 'Idle');

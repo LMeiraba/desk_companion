@@ -51,6 +51,8 @@ interface WindowsControlStore {
     album: string;
     isPlaying: boolean;
     albumArtUrl?: string;
+    progressMs?: number;
+    durationMs?: number;
     timestamp: number;
   } | null;
   setWindowsMedia: (
@@ -61,6 +63,8 @@ interface WindowsControlStore {
       album: string;
       isPlaying: boolean;
       albumArtUrl?: string;
+      progressMs?: number;
+      durationMs?: number;
       timestamp: number;
     } | null
   ) => void;

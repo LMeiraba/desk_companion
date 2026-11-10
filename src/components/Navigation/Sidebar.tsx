@@ -119,17 +119,24 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </nav>
       </div>
 
-      {/* Footer Info / Auth Button */}
-      {!session?.isAuthenticated && (
-        <div className="pt-4 border-t border-neutral-900">
+      {/* Footer Info / Version Display */}
+      <div className="pt-3 border-t border-neutral-900 space-y-2">
+        {!session?.isAuthenticated && (
           <button
             onClick={onOpenLogin}
             className="w-full py-3 px-4 bg-emerald-500 hover:bg-emerald-400 text-black font-bold rounded-2xl text-xs transition-all shadow-lg shadow-emerald-500/20"
           >
             Connect Spotify
           </button>
+        )}
+        <div className="flex items-center justify-between px-2 pt-1 text-[11px] font-mono text-neutral-500">
+          <span className="font-semibold text-neutral-400">v0.1.0</span>
+          <span className="flex items-center gap-1.5 text-[10px] text-neutral-500">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block animate-pulse" />
+            BETA
+          </span>
         </div>
-      )}
+      </div>
     </aside>
   );
 };

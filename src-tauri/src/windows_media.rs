@@ -13,6 +13,8 @@ pub struct WindowsMediaState {
     pub album: String,
     pub is_playing: bool,
     pub album_art_url: Option<String>,
+    pub progress_ms: u64,
+    pub duration_ms: u64,
     pub timestamp: u64,
 }
 
@@ -88,6 +90,22 @@ impl WindowsMediaTracker {
                                             (String::new(), String::new(), String::new())
                                         };
 
+                                        let (progress_ms, duration_ms) = if let Some(ref t) = model.timeline {
+                                            let dur = if t.end > t.start {
+                                                ((t.end - t.start) / 10_000).max(0) as u64
+                                            } else {
+                                                0
+                                            };
+                                            let pos = if t.position > t.start {
+                                                ((t.position - t.start) / 10_000).max(0) as u64
+                                            } else {
+                                                0
+                                            };
+                                            (pos, dur)
+                                        } else {
+                                            (0, 0)
+                                        };
+
                                         if let Ok(mut map) = sessions_clone.write() {
                                             let entry = map.entry(session_id).or_insert_with(|| {
                                                 (src_for_task.clone(), WindowsMediaState {
@@ -101,6 +119,10 @@ impl WindowsMediaTracker {
                                                 entry.1.album = album;
                                             }
                                             entry.1.is_playing = is_playing;
+                                            if duration_ms > 0 {
+                                                entry.1.duration_ms = duration_ms;
+                                                entry.1.progress_ms = progress_ms;
+                                            }
                                             entry.1.timestamp = std::time::SystemTime::now()
                                                 .duration_since(std::time::UNIX_EPOCH)
                                                 .map(|d| d.as_millis() as u64)
@@ -159,6 +181,22 @@ impl WindowsMediaTracker {
                                             }
                                             if art_url.is_some() {
                                                 entry.1.album_art_url = art_url;
+                                            }
+                                            if let Some(ref t) = model.timeline {
+                                                let dur = if t.end > t.start {
+                                                    ((t.end - t.start) / 10_000).max(0) as u64
+                                                } else {
+                                                    0
+                                                };
+                                                let pos = if t.position > t.start {
+                                                    ((t.position - t.start) / 10_000).max(0) as u64
+                                                } else {
+                                                    0
+                                                };
+                                                if dur > 0 {
+                                                    entry.1.duration_ms = dur;
+                                                    entry.1.progress_ms = pos;
+                                                }
                                             }
                                         }
                                     }
