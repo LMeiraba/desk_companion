@@ -94,30 +94,33 @@ export function useHardwareSync() {
       const activeIsPlaying = currentUseWinMedia && currentWinMedia ? currentWinMedia.isPlaying : isSpotifyPlayingNow;
       const trackId = currentUseWinMedia && currentWinMedia ? `win_${currentWinMedia.source}_${currentWinMedia.title}` : (playbackState?.track?.id || '');
 
-      // Direct stream of parsed lines: guarantees 100% parity between app simulator and physical display
+      // Direct stream of paced sub-chunks: guarantees bold size 2 typography and 100% parity
+      const stream = pacedLines && pacedLines.length > 0 ? pacedLines : parsedLines;
+      const currentIndex = pacedLines && pacedLines.length > 0 ? activePacedIndex : activeLineIndex;
+
       const currentLyric = isSynced
-        ? (activeLineIndex >= 0 && parsedLines[activeLineIndex]
-            ? parsedLines[activeLineIndex].text
+        ? (currentIndex >= 0 && stream[currentIndex]
+            ? stream[currentIndex].text
             : '♪ Instrumental ♪')
         : null;
 
       const prevLyric =
-        isSynced && activeLineIndex > 0 && parsedLines[activeLineIndex - 1]
-          ? parsedLines[activeLineIndex - 1].text
+        isSynced && currentIndex > 0 && stream[currentIndex - 1]
+          ? stream[currentIndex - 1].text
           : null;
 
       const nextLyric =
-        isSynced && activeLineIndex >= 0 && activeLineIndex + 1 < parsedLines.length
-          ? parsedLines[activeLineIndex + 1].text
+        isSynced && currentIndex >= 0 && currentIndex + 1 < stream.length
+          ? stream[currentIndex + 1].text
           : null;
 
       const lines = [-2, -1, 0, 1, 2].map((offset) => {
-        if (offset === 0 && activeLineIndex === -1 && isSynced) return '♪ Instrumental ♪';
-        const idx = activeLineIndex + offset;
-        return idx >= 0 && idx < parsedLines.length ? parsedLines[idx].text : '';
+        if (offset === 0 && currentIndex === -1 && isSynced) return '♪ Instrumental ♪';
+        const idx = currentIndex + offset;
+        return idx >= 0 && idx < stream.length ? stream[idx].text : '';
       });
 
-      const isLineChanged = activeLineIndex !== lastLineSentRef.current;
+      const isLineChanged = currentIndex !== lastLineSentRef.current;
       const isScreenChanged = deckScreen !== lastScreenSentRef.current;
       const isTrackChanged = trackId !== lastTrackSentRef.current;
       const isForceResync = forceResyncRef.current;

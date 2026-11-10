@@ -24,8 +24,10 @@ export const SyncedLyricsView: React.FC<SyncedLyricsViewProps> = ({ className = 
   const {
     lyrics,
     parsedLines,
+    pacedLines,
     isLoading,
     activeLineIndex,
+    activePacedIndex,
     isSynced,
     manualOffsetMs,
     adjustManualOffsetMs,
@@ -33,6 +35,10 @@ export const SyncedLyricsView: React.FC<SyncedLyricsViewProps> = ({ className = 
     fetchLyricsForTrack,
     updateProgress,
   } = useLyricsStore();
+
+  const [isPacedMode, setIsPacedMode] = useState(true);
+  const displayLines = isPacedMode && pacedLines && pacedLines.length > 0 ? pacedLines : parsedLines;
+  const currentActiveIndex = isPacedMode && pacedLines && pacedLines.length > 0 ? activePacedIndex : activeLineIndex;
 
   const [autoScroll, setAutoScroll] = useState(true);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -55,7 +61,7 @@ export const SyncedLyricsView: React.FC<SyncedLyricsViewProps> = ({ className = 
         block: 'center',
       });
     }
-  }, [activeLineIndex, autoScroll]);
+  }, [currentActiveIndex, autoScroll]);
 
   // Handle user manual scroll: pause auto-scroll for 4.5 seconds
   const handleScroll = () => {
@@ -149,6 +155,21 @@ export const SyncedLyricsView: React.FC<SyncedLyricsViewProps> = ({ className = 
                 <Radio className="w-2.5 h-2.5 animate-pulse" />
                 LRC
               </span>
+
+              {/* Intelligent Sub-Chunk Pacing Toggle */}
+              {isSynced && pacedLines.length > 0 && (
+                <button
+                  onClick={() => setIsPacedMode(!isPacedMode)}
+                  className={`flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full border font-mono font-bold transition-all ${
+                    isPacedMode
+                      ? 'bg-cyan-500/15 border-cyan-500/30 text-cyan-400'
+                      : 'bg-neutral-900 border-neutral-800 text-neutral-500 hover:text-neutral-300'
+                  }`}
+                  title={isPacedMode ? 'Intelligent Sub-Chunk Pacing Active' : 'Standard Full Verse Mode'}
+                >
+                  <span>{isPacedMode ? 'Split: ON' : 'Split: OFF'}</span>
+                </button>
+              )}
             </>
           )}
 
@@ -211,7 +232,7 @@ export const SyncedLyricsView: React.FC<SyncedLyricsViewProps> = ({ className = 
               <p className="text-xs text-neutral-500">This song does not contain vocal lyrics.</p>
             </div>
           </div>
-        ) : parsedLines.length === 0 ? (
+        ) : displayLines.length === 0 ? (
           <div className="h-full flex flex-col items-center justify-center space-y-4 py-20 text-neutral-500">
             <Sparkles className="w-10 h-10 text-neutral-600" />
             <div className="space-y-1">
@@ -228,9 +249,9 @@ export const SyncedLyricsView: React.FC<SyncedLyricsViewProps> = ({ className = 
             </button>
           </div>
         ) : (
-          parsedLines.map((line, index) => {
-            const isActive = isSynced && index === activeLineIndex;
-            const isPast = isSynced && index < activeLineIndex;
+          displayLines.map((line, index) => {
+            const isActive = isSynced && index === currentActiveIndex;
+            const isPast = isSynced && index < currentActiveIndex;
 
             return (
               <div

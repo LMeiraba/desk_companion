@@ -20,7 +20,7 @@ interface MiniPlayerModalProps {
 
 export const MiniPlayerModal: React.FC<MiniPlayerModalProps> = ({ isOpen, onClose }) => {
   const { playbackState } = usePlayerStore();
-  const { parsedLines, activeLineIndex, isSynced } = useLyricsStore();
+  const { parsedLines, pacedLines, activeLineIndex, activePacedIndex, isSynced } = useLyricsStore();
   const [dominantColor, setDominantColor] = useState('#10b981');
 
   const track = playbackState?.track;
@@ -45,9 +45,12 @@ export const MiniPlayerModal: React.FC<MiniPlayerModalProps> = ({ isOpen, onClos
     onClose();
   };
 
+  const stream = pacedLines && pacedLines.length > 0 ? pacedLines : parsedLines;
+  const currentIdx = pacedLines && pacedLines.length > 0 ? activePacedIndex : activeLineIndex;
+
   const currentLyric =
-    isSynced && activeLineIndex >= 0 && parsedLines[activeLineIndex]
-      ? parsedLines[activeLineIndex].text
+    isSynced && currentIdx >= 0 && stream[currentIdx]
+      ? stream[currentIdx].text
       : null;
 
   useEffect(() => {

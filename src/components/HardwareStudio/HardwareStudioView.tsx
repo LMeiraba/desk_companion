@@ -34,10 +34,10 @@ import { weatherService, WeatherData } from '../../services/weatherService';
 
 export const HardwareStudioView: React.FC = () => {
   const { playbackState, deckScreen: activeScreen, setDeckScreen: setActiveScreen } = usePlayerStore();
-  const { parsedLines, activeLineIndex, isSynced } = useLyricsStore();
+  const { parsedLines, pacedLines, activeLineIndex, activePacedIndex, isSynced } = useLyricsStore();
 
-  const activeStream = parsedLines;
-  const activeIndex = activeLineIndex;
+  const activeStream = pacedLines && pacedLines.length > 0 ? pacedLines : parsedLines;
+  const activeIndex = pacedLines && pacedLines.length > 0 ? activePacedIndex : activeLineIndex;
 
   // Screen Modes: 'now_playing' | 'lyrics' | 'clock' | 'weather'
   const [isMenuOpen, setIsMenuOpen] = useState(false);

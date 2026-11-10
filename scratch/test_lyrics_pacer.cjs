@@ -177,8 +177,5 @@ const testLines = [
 ];
 
 console.log("=== RAW LINES VS PACED SUB-CHUNKS ===");
-const paced = expandAndPaceLyrics(testLines, 18);
-for (const p of paced) {
-  const timeStr = `${Math.floor(p.timeMs / 1000)}.${String(p.timeMs % 1000).padStart(3, '0')}s`;
-  console.log(`[${timeStr}] (${p.text.length} chars) "${p.text}" ${p.isSubChunk ? `[chunk ${p.subChunkIndex + 1}/${p.totalSubChunks}]` : ''}`);
-}
+module.exports = { expandAndPaceLyrics, splitLineIntoChunks };
+
