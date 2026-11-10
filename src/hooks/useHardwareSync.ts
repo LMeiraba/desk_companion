@@ -4,6 +4,7 @@ import { useLyricsStore } from '../stores/useLyricsStore';
 import { useWindowsControlStore } from '../stores/useWindowsControlStore';
 import { hardwareWs } from '../services/hardwareWs';
 import { extractDominantColor, generateThumbnailRGB565Base64 } from '../services/dominantColor';
+import { weatherService, WeatherData } from '../services/weatherService';
 
 /**
  * Global hook to stream player state and synchronized lyrics
@@ -21,6 +22,19 @@ export function useHardwareSync() {
   const lastTrackIdRef = useRef<string>('');
   const lastTrackSentRef = useRef<string>('');
   const forceResyncRef = useRef<boolean>(true);
+  const weatherRef = useRef<WeatherData | null>(null);
+
+  // Sync live weather every 10 minutes
+  useEffect(() => {
+    const fetchWeather = () => {
+      weatherService.getWeather().then((w) => {
+        weatherRef.current = w;
+      });
+    };
+    fetchWeather();
+    const weatherTimer = setInterval(fetchWeather, 10 * 60 * 1000);
+    return () => clearInterval(weatherTimer);
+  }, []);
 
   // Initialize Hardware WebSocket connection on app startup (reads last saved address if available)
   useEffect(() => {
@@ -142,6 +156,7 @@ export function useHardwareSync() {
           volumePercent,
           timeStr: new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true }).toLowerCase(),
           dateStr: new Date().toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' }).toUpperCase(),
+          weather: weatherRef.current || undefined,
         });
       }
     };

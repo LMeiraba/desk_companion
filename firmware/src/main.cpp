@@ -48,6 +48,7 @@
 #define I2C_SDA_PIN     0
 #define I2C_SCL_PIN     1
 #define PCF8574_ADDR    0x27
+#define DHT_PIN         8
 
 // Hardware MADCTL bit definitions for ILI9341
 #define MADCTL_MY  0x80  // Row address order
@@ -63,9 +64,41 @@ WebServer server(80);
 DNSServer dnsServer;
 Preferences prefs;
 
+// --- DHT Sensor State (Indoor Climate) ---
+struct DHTData {
+  float temperature = 0.0f;
+  float humidity = 0.0f;
+  bool valid = false;
+  uint32_t lastReadMs = 0;
+};
+DHTData dhtSensor;
+
+// --- Live Weather State (Outdoor via Open-Meteo) ---
+struct WeatherState {
+  int temp = 24;
+  String condition = "Partly Cloudy";
+  int humidity = 50;
+  String city = "Local Area";
+  int highTemp = 28;
+  int lowTemp = 18;
+  bool valid = false;
+};
+WeatherState weatherState;
+
+// --- Notification Banner State ---
+String notifTitle = "";
+String notifBody = "";
+uint32_t notifExpireTime = 0;
+
+// --- On-Screen Knob Switcher Menu ---
+bool isKnobMenuOpen = false;
+int knobMenuIndex = 0;
+const char* SCREEN_MODES[] = {"lyrics", "now_playing", "clock", "weather"};
+const int TOTAL_SCREEN_MODES = 4;
+
 // --- State Variables ---
 struct AppState {
-  String screenMode = "lyrics"; // "lyrics", "now_playing", "clock"
+  String screenMode = "lyrics"; // "lyrics", "now_playing", "clock", "weather"
   String trackName = "No Track Playing";
   String artistName = "Desk Companion";
   bool isPlaying = false;
@@ -79,8 +112,8 @@ struct AppState {
   String lines[5];
   bool hasLyrics = false;
   uint8_t clientCount = 0;
-  int rotation = 1; // 1 = Landscape (320x240), 0 = Portrait (240x320)
-  String timeStr = "12:00";
+  int rotation = 0; // 0 = Portrait (240x320), 1 = Landscape (320x240)
+  String timeStr = "12:00 am";
   String dateStr = "DESK COMPANION";
 };
 
@@ -93,6 +126,7 @@ uint32_t lastTftUpdate = 0;
 uint32_t hudExpireTime = 0;
 String hudMessage = "";
 int localScrollOffset = 0;
+uint32_t lastNtpSyncMs = 0;
 
 // --- Rotary Encoder State ---
 volatile int8_t encDelta = 0;
@@ -230,18 +264,7 @@ uint16_t parseColorToRGB565(const String& colStr) {
     }
   }
 
-  // Ensure high contrast & visibility on TN TFT panels against black background:
-  float lum = 0.299f * r + 0.587f * g + 0.114f * b;
-  if (lum < 140.0f) {
-    float factor = (lum > 20.0f) ? (165.0f / lum) : 5.0f;
-    r = constrain((int)(r * factor), 0, 255);
-    g = constrain((int)(g * factor), 0, 255);
-    b = constrain((int)(b * factor), 0, 255);
-    if ((int)r + g + b < 210) {
-      r = 16; g = 185; b = 129; // High-visibility Emerald fallback
-    }
-  }
-
+  // Directly and faithfully encode 24-bit RGB to 16-bit RGB565 matching frontend hex 1:1
   return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
 }
 
@@ -251,6 +274,91 @@ uint16_t hexToRGB565(const String& hex) {
 
 void setBacklight(uint8_t duty) {
   ledcWrite(BL_PWM_CHANNEL, duty);
+}
+
+// --- Non-blocking High-Precision DHT Sensor Reader (GPIO 8) ---
+bool readDHT(float &outTemp, float &outHum) {
+  uint8_t data[5] = {0, 0, 0, 0, 0};
+
+  pinMode(DHT_PIN, OUTPUT);
+  digitalWrite(DHT_PIN, LOW);
+  delay(18); // Start signal for DHT11/DHT22
+  digitalWrite(DHT_PIN, HIGH);
+  delayMicroseconds(30);
+  pinMode(DHT_PIN, INPUT_PULLUP);
+
+  uint32_t t = micros();
+  while (digitalRead(DHT_PIN) == HIGH) {
+    if (micros() - t > 120) return false;
+  }
+  t = micros();
+  while (digitalRead(DHT_PIN) == LOW) {
+    if (micros() - t > 120) return false;
+  }
+  t = micros();
+  while (digitalRead(DHT_PIN) == HIGH) {
+    if (micros() - t > 120) return false;
+  }
+
+  // Read 40 bits
+  for (int i = 0; i < 40; i++) {
+    t = micros();
+    while (digitalRead(DHT_PIN) == LOW) {
+      if (micros() - t > 120) return false;
+    }
+    uint32_t highStart = micros();
+    while (digitalRead(DHT_PIN) == HIGH) {
+      if (micros() - highStart > 120) return false;
+    }
+    uint32_t highDuration = micros() - highStart;
+    int byteIdx = i / 8;
+    data[byteIdx] <<= 1;
+    if (highDuration > 38) { // >38us indicates '1'
+      data[byteIdx] |= 1;
+    }
+  }
+
+  // Checksum test
+  if ((uint8_t)(data[0] + data[1] + data[2] + data[3]) != data[4]) {
+    return false;
+  }
+
+  if (data[1] == 0 && data[3] == 0) {
+    outHum = (float)data[0];
+    outTemp = (float)data[2];
+  } else {
+    outHum = (float)((data[0] << 8) | data[1]) * 0.1f;
+    outTemp = (float)(((data[2] & 0x7F) << 8) | data[3]) * 0.1f;
+    if (data[2] & 0x80) outTemp = -outTemp;
+  }
+  return true;
+}
+
+// --- Standalone Autonomous NTP & RTC Clock Sync ---
+void syncInternalClock() {
+  struct tm timeinfo;
+  if (getLocalTime(&timeinfo, 10)) {
+    char tBuf[16];
+    int h12 = timeinfo.tm_hour % 12;
+    if (h12 == 0) h12 = 12;
+    const char* ampm = (timeinfo.tm_hour >= 12) ? "pm" : "am";
+    snprintf(tBuf, sizeof(tBuf), "%d:%02d %s", h12, timeinfo.tm_min, ampm);
+    state.timeStr = String(tBuf);
+
+    char dBuf[32];
+    strftime(dBuf, sizeof(dBuf), "%a, %d %b", &timeinfo);
+    state.dateStr = String(dBuf);
+    state.dateStr.toUpperCase();
+  }
+}
+
+// --- Notification Banner Trigger ---
+void showNotificationToast(const String& title, const String& body) {
+  notifTitle = title;
+  notifBody = body;
+  notifExpireTime = millis() + 4500;
+  fullRedrawNeeded = true;
+  Serial.printf("[Notification] Toast triggered: '%s' - '%s'\n", title.c_str(), body.c_str());
 }
 
 static bool pcf8574Present = false;
@@ -692,17 +800,33 @@ void drawNowPlayingView(bool forceRedraw = false) {
   }
 }
 
+// --- 100% Flicker-Free Differential Clock View ---
+static String lastDrawnClockTime = "";
+static String lastDrawnClockDate = "";
+static String lastDrawnClockTrack = "";
+static uint16_t lastDrawnClockAccent = 0xFFFF;
+
 void drawClockView(bool forceRedraw = false) {
   int w = tft.width();
   int h = tft.height();
 
-  if (forceRedraw) {
+  if (forceRedraw || lastDrawnClockAccent != state.accentColor) {
     tft.fillRect(0, 0, w, h, ILI9341_BLACK);
     drawAmbientTopGlow(state.accentColor, 80);
+    lastDrawnClockTime = "";
+    lastDrawnClockDate = "";
+    lastDrawnClockTrack = "";
+    lastDrawnClockAccent = state.accentColor;
+  }
 
-    // Large Clock Time (e.g. "12:29 am")
-    String tStr = state.timeStr.length() > 0 ? state.timeStr : "12:00 am";
-    int timeY = (h >= 320) ? 62 : 32;
+  // Large Clock Time (e.g. "12:29 am")
+  String tStr = state.timeStr.length() > 0 ? state.timeStr : "12:00 am";
+  int timeY = (h >= 320) ? 62 : 32;
+
+  // Differential Time update: Only rewrite the time bounding area without clearing whole screen!
+  if (tStr != lastDrawnClockTime) {
+    lastDrawnClockTime = tStr;
+    tft.fillRect(0, timeY - 2, w, 40, ILI9341_BLACK);
 
     int ampmIdx = tStr.indexOf("am");
     if (ampmIdx == -1) ampmIdx = tStr.indexOf("pm");
@@ -715,7 +839,6 @@ void drawClockView(bool forceRedraw = false) {
       String suffix = tStr.substring(ampmIdx);
       suffix.trim();
 
-      // Main time (e.g. "12:29") in size 4 (24px/char), suffix (e.g. "am") in size 2 (12px/char)
       int mainW = mainTime.length() * 24;
       int gap = 8;
       int suffW = suffix.length() * 12;
@@ -733,17 +856,27 @@ void drawClockView(bool forceRedraw = false) {
     } else {
       drawCenteredText(tStr, timeY, 4, ILI9341_WHITE, ILI9341_BLACK);
     }
+  }
 
-    // Date String (e.g. "TUE, 10 NOV")
-    String dStr = state.dateStr.length() > 0 ? state.dateStr : "DESK COMPANION";
-    int dateY = timeY + 44;
-    drawCenteredText(dStr, dateY, 1, 0x7BEF, ILI9341_BLACK);
+  // Differential Date update
+  String dStr = state.dateStr.length() > 0 ? state.dateStr : "DESK COMPANION";
+  int dateY = timeY + 44;
+  if (dStr != lastDrawnClockDate) {
+    lastDrawnClockDate = dStr;
+    tft.fillRect(0, dateY - 2, w, 16, ILI9341_BLACK);
+    drawCenteredText(dStr, dateY, 1, 0x8410, ILI9341_BLACK);
+  }
 
-    // Mini Now Playing Card placed at bottom (matching mockup layout)
-    int cardW = w - 24;
-    int cardH = 48;
-    int cardX = 12;
-    int cardY = (h >= 320) ? (h - cardH - 24) : (dateY + 28);
+  // Differential Mini Now Playing Card update
+  int cardW = w - 24;
+  int cardH = 48;
+  int cardX = 12;
+  int cardY = (h >= 320) ? (h - cardH - 24) : (dateY + 28);
+
+  String trackKey = state.trackName + "|" + state.artistName;
+  if (forceRedraw || trackKey != lastDrawnClockTrack) {
+    lastDrawnClockTrack = trackKey;
+    tft.fillRect(cardX - 1, cardY - 1, cardW + 2, cardH + 2, ILI9341_BLACK);
     tft.fillRoundRect(cardX, cardY, cardW, cardH, 8, 0x10A2);
     tft.drawRoundRect(cardX, cardY, cardW, cardH, 8, 0x2965);
 
@@ -767,7 +900,7 @@ void drawClockView(bool forceRedraw = false) {
     String art = state.artistName;
     int maxArt = (w >= 320) ? 30 : 20;
     if (art.length() > maxArt) art = art.substring(0, maxArt - 2) + "..";
-    tft.setTextColor(0x7BEF, 0x10A2);
+    tft.setTextColor(0x8410, 0x10A2);
     tft.setCursor(cardX + 26, cardY + 28);
     tft.print(art);
   }
@@ -781,6 +914,132 @@ void drawClockView(bool forceRedraw = false) {
     tft.fillRoundRect(hudX, hudY, hudW, hudH, 4, 0x10A2);
     tft.drawRoundRect(hudX, hudY, hudW, hudH, 4, state.accentColor);
     drawCenteredText(hudMessage, hudY + 7, 1, state.accentColor, 0x10A2);
+  }
+}
+
+// --- Weather Screen View (Live API + DHT Sensor) ---
+void drawWeatherView(bool forceRedraw = false) {
+  int w = tft.width();
+  int h = tft.height();
+
+  if (forceRedraw) {
+    tft.fillRect(0, 0, w, h, ILI9341_BLACK);
+    drawAmbientTopGlow(state.accentColor, 80);
+  }
+
+  // Location / City
+  int topY = (h >= 320) ? 38 : 18;
+  String city = weatherState.city;
+  drawCenteredText(city, topY, 1, 0x8410, ILI9341_BLACK);
+
+  // Large Outdoor Temperature
+  int tempY = topY + 18;
+  String tempStr = String(weatherState.temp) + " C";
+  drawCenteredText(tempStr, tempY, 4, ILI9341_WHITE, ILI9341_BLACK);
+
+  // Condition (e.g. Partly Cloudy)
+  int condY = tempY + 38;
+  drawCenteredText(weatherState.condition, condY, 1, state.accentColor, ILI9341_BLACK);
+
+  // Stats line (High, Low, Humidity)
+  int statsY = condY + 18;
+  String stats = "H:" + String(weatherState.highTemp) + "  L:" + String(weatherState.lowTemp) + "  RH:" + String(weatherState.humidity) + "%";
+  drawCenteredText(stats, statsY, 1, 0x7BEF, ILI9341_BLACK);
+
+  // Indoor DHT Sensor Card
+  int cardW = w - 24;
+  int cardH = 58;
+  int cardX = 12;
+  int cardY = (h >= 320) ? (h - cardH - 24) : (statsY + 24);
+
+  tft.fillRoundRect(cardX, cardY, cardW, cardH, 8, 0x10A2);
+  tft.drawRoundRect(cardX, cardY, cardW, cardH, 8, 0x2965);
+
+  tft.setTextSize(1);
+  tft.setTextColor(ILI9341_CYAN, 0x10A2);
+  tft.setCursor(cardX + 12, cardY + 10);
+  tft.print("INDOOR SENSOR (DHT-8)");
+
+  tft.setTextColor(ILI9341_WHITE, 0x10A2);
+  tft.setCursor(cardX + 12, cardY + 26);
+  if (dhtSensor.valid) {
+    char dhtBuf[32];
+    snprintf(dhtBuf, sizeof(dhtBuf), "Temp: %.1f C  RH: %.0f%%", dhtSensor.temperature, dhtSensor.humidity);
+    tft.print(dhtBuf);
+  } else {
+    tft.print("DHT Sensor: Ready (GPIO 8)");
+  }
+
+  tft.setTextColor(0x7BEF, 0x10A2);
+  tft.setCursor(cardX + 12, cardY + 42);
+  tft.print("Ambient Room Climate");
+}
+
+// --- Discrete Standalone Mode Indicator Badge ---
+void drawStandaloneBadge() {
+  int w = tft.width();
+  bool wifiOk = (WiFi.status() == WL_CONNECTED);
+  uint16_t dotCol = wifiOk ? 0x2690 : 0xFD20; // soft green or amber
+  tft.fillCircle(w / 2 - 40, 12, 3, dotCol);
+  tft.setTextSize(1);
+  tft.setTextColor(0x7BEF, ILI9341_BLACK);
+  tft.setCursor(w / 2 - 32, 9);
+  tft.print(wifiOk ? "Standalone" : "Offline");
+}
+
+// --- Native Notification Toast Popup ---
+void drawNotificationToast() {
+  if (millis() >= notifExpireTime || notifTitle.length() == 0) return;
+  int w = tft.width();
+  int cardW = w - 16;
+  int cardH = 46;
+  int cardX = 8;
+  int cardY = 8;
+
+  tft.fillRoundRect(cardX, cardY, cardW, cardH, 8, 0x18C3);
+  tft.drawRoundRect(cardX, cardY, cardW, cardH, 8, state.accentColor);
+
+  tft.fillCircle(cardX + 14, cardY + 15, 3, state.accentColor);
+
+  tft.setTextSize(1);
+  tft.setTextColor(ILI9341_WHITE, 0x18C3);
+  tft.setCursor(cardX + 24, cardY + 11);
+  String t = notifTitle;
+  if (t.length() > 22) t = t.substring(0, 19) + "...";
+  tft.print(t);
+
+  tft.setTextColor(0x8410, 0x18C3);
+  tft.setCursor(cardX + 24, cardY + 26);
+  String b = notifBody;
+  if (b.length() > 26) b = b.substring(0, 23) + "...";
+  tft.print(b);
+}
+
+// --- On-Screen Knob Screen Switcher Menu ---
+void drawKnobSwitcherMenu() {
+  int w = tft.width();
+  int h = tft.height();
+  int menuW = w - 24;
+  int menuH = 140;
+  int menuX = 12;
+  int menuY = (h - menuH) / 2;
+
+  tft.fillRoundRect(menuX, menuY, menuW, menuH, 10, 0x0841);
+  tft.drawRoundRect(menuX, menuY, menuW, menuH, 10, state.accentColor);
+
+  drawCenteredText("SELECT SCREEN (KNOB)", menuY + 10, 1, 0xAD55, 0x0841);
+
+  const char* labels[] = {"1. Synced Lyrics", "2. Now Playing", "3. Desk Clock", "4. Weather & DHT"};
+  for (int i = 0; i < 4; i++) {
+    int itemY = menuY + 28 + i * 26;
+    bool selected = (i == knobMenuIndex);
+    if (selected) {
+      tft.fillRoundRect(menuX + 8, itemY, menuW - 16, 22, 6, state.accentColor);
+      drawCenteredText(labels[i], itemY + 7, 1, ILI9341_BLACK, state.accentColor);
+    } else {
+      tft.fillRoundRect(menuX + 8, itemY, menuW - 16, 22, 6, 0x18C3);
+      drawCenteredText(labels[i], itemY + 7, 1, ILI9341_WHITE, 0x18C3);
+    }
   }
 }
 
@@ -1049,6 +1308,25 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length
           }
           return;
         }
+        if (strcmp(cmd, "notification_alert") == 0) {
+          String title = doc["title"].is<String>() ? doc["title"].as<String>() : "Notification";
+          String body = doc["body"].is<String>() ? doc["body"].as<String>() : "";
+          showNotificationToast(title, body);
+          return;
+        }
+      }
+
+      // Live Weather payload from Desktop App (Open-Meteo)
+      if (doc["weather"].is<JsonObject>()) {
+        JsonObject w = doc["weather"].as<JsonObject>();
+        if (w["temp"].is<int>()) weatherState.temp = w["temp"].as<int>();
+        if (w["condition"].is<String>()) weatherState.condition = w["condition"].as<String>();
+        if (w["humidity"].is<int>()) weatherState.humidity = w["humidity"].as<int>();
+        if (w["city"].is<String>()) weatherState.city = w["city"].as<String>();
+        if (w["highTemp"].is<int>()) weatherState.highTemp = w["highTemp"].as<int>();
+        if (w["lowTemp"].is<int>()) weatherState.lowTemp = w["lowTemp"].as<int>();
+        weatherState.valid = true;
+        if (state.screenMode == "weather") fullRedrawNeeded = true;
       }
 
       if (doc["screen"].is<String>()) {
@@ -1343,6 +1621,10 @@ void setup() {
     Serial.println("[mDNS] Responder started: desk-companion.local");
   }
 
+  // Set up Network Time Protocol (NTP) for autonomous standalone clock
+  configTime(19800, 0, "pool.ntp.org", "time.google.com");
+  Serial.println("[NTP] Standalone time sync active (GMT+5:30)");
+
   webSocket.begin();
   webSocket.onEvent(webSocketEvent);
   Serial.println("[WS] WebSocket Server active on port 81");
@@ -1412,33 +1694,60 @@ void loop() {
 
   webSocket.loop();
 
-  // 1. Rotary Encoder Rotation (Spotify Seek)
+  // Periodic DHT Sensor Reading (Every 2500ms on GPIO 8)
+  if (millis() - dhtSensor.lastReadMs >= 2500) {
+    dhtSensor.lastReadMs = millis();
+    float t = 0, h = 0;
+    if (readDHT(t, h)) {
+      dhtSensor.temperature = t;
+      dhtSensor.humidity = h;
+      dhtSensor.valid = true;
+      if (state.screenMode == "weather") fullRedrawNeeded = true;
+    }
+  }
+
+  // Periodic Autonomous NTP / RTC Clock Sync (Every 1000ms)
+  if (millis() - lastNtpSyncMs >= 1000) {
+    lastNtpSyncMs = millis();
+    syncInternalClock();
+    if (state.screenMode == "clock") {
+      // Differential clock tick (zero flicker)
+      drawClockView(false);
+      if (state.clientCount == 0) drawStandaloneBadge();
+    }
+  }
+
+  // 1. Rotary Encoder Rotation
   if (encDelta != 0) {
     int delta = encDelta;
     encDelta = 0;
 
-    localScrollOffset += delta * -12;
-    if (localScrollOffset > 25) localScrollOffset = 25;
-    if (localScrollOffset < -25) localScrollOffset = -25;
+    if (isKnobMenuOpen) {
+      knobMenuIndex = (knobMenuIndex + (delta > 0 ? 1 : -1) + TOTAL_SCREEN_MODES) % TOTAL_SCREEN_MODES;
+      drawKnobSwitcherMenu();
+    } else {
+      localScrollOffset += delta * -12;
+      if (localScrollOffset > 25) localScrollOffset = 25;
+      if (localScrollOffset < -25) localScrollOffset = -25;
 
-    // Instantly update local progressMs optimistically on device
-    int32_t newPos = (int32_t)state.progressMs + (delta * 5000);
-    if (newPos < 0) newPos = 0;
-    if (newPos > (int32_t)state.durationMs) newPos = state.durationMs;
-    state.progressMs = (uint32_t)newPos;
-    state.lastProgressUpdateMs = millis();
+      int32_t newPos = (int32_t)state.progressMs + (delta * 5000);
+      if (newPos < 0) newPos = 0;
+      if (newPos > (int32_t)state.durationMs) newPos = state.durationMs;
+      state.progressMs = (uint32_t)newPos;
+      state.lastProgressUpdateMs = millis();
 
-    hudMessage = delta > 0 ? "Seek >> +5s" : "Seek << -5s";
-    hudExpireTime = millis() + 1200;
+      hudMessage = delta > 0 ? "Seek >> +5s" : "Seek << -5s";
+      hudExpireTime = millis() + 1200;
 
-    Serial.printf("[Encoder] Turned! Delta: %d, NewPos: %u ms\n", delta, state.progressMs);
+      Serial.printf("[Encoder] Turned! Delta: %d, NewPos: %u ms\n", delta, state.progressMs);
 
-    if (state.clientCount > 0) {
-      char jsonBuf[64];
-      snprintf(jsonBuf, sizeof(jsonBuf), "{\"type\":\"encoder\",\"id\":2,\"delta\":%d}", delta);
-      webSocket.broadcastTXT(jsonBuf);
+      if (state.clientCount > 0) {
+        char jsonBuf[64];
+        snprintf(jsonBuf, sizeof(jsonBuf), "{\"type\":\"encoder\",\"id\":2,\"delta\":%d}", delta);
+        webSocket.broadcastTXT(jsonBuf);
+      }
+      fullRedrawNeeded = true;
     }
-    fullRedrawNeeded = true;
   }
 
   if (localScrollOffset != 0) {
@@ -1460,35 +1769,27 @@ void loop() {
       lastBtnState = LOW;
       longPressHandled = false;
     } else if (btnPressed && lastBtnState == LOW && !longPressHandled) {
-      // Long press detection while held (> 600ms) -> CYCLE SCREEN MODE
-      if (millis() - btnPressTime >= 600) {
+      // Long press (> 500ms): Toggle On-Screen Switcher Menu
+      if (millis() - btnPressTime >= 500) {
         longPressHandled = true;
-
-        if (state.screenMode == "lyrics") {
-          state.screenMode = "now_playing";
-        } else if (state.screenMode == "now_playing") {
-          state.screenMode = "clock";
+        isKnobMenuOpen = !isKnobMenuOpen;
+        if (isKnobMenuOpen) {
+          // Find active screen index in menu
+          for (int i = 0; i < TOTAL_SCREEN_MODES; i++) {
+            if (state.screenMode == SCREEN_MODES[i]) {
+              knobMenuIndex = i;
+              break;
+            }
+          }
+          drawKnobSwitcherMenu();
         } else {
-          state.screenMode = "lyrics";
-        }
-
-        hudMessage = "Screen: " + state.screenMode;
-        hudExpireTime = millis() + 1500;
-        tft.fillScreen(ILI9341_BLACK);
-        fullRedrawNeeded = true;
-
-        Serial.printf("[Knob] Long Press: Cycled screen to %s\n", state.screenMode.c_str());
-
-        if (state.clientCount > 0) {
-          char buf[64];
-          snprintf(buf, sizeof(buf), "{\"type\":\"screen\",\"screen\":\"%s\"}", state.screenMode.c_str());
-          webSocket.broadcastTXT(buf);
+          fullRedrawNeeded = true;
         }
       }
     } else if (!btnPressed && lastBtnState == LOW) {
       uint32_t duration = millis() - btnPressTime;
       lastBtnState = HIGH;
-      if (!longPressHandled && duration > 40 && duration < 600) {
+      if (!longPressHandled && duration > 40 && duration < 500) {
         clickCount++;
         lastClickRelease = millis();
       }
@@ -1496,40 +1797,71 @@ void loop() {
     }
 
     if (clickCount > 0 && (millis() - lastClickRelease > 280)) {
-      if (clickCount == 1) {
-        hudMessage = "Skip >> Next";
-        hudExpireTime = millis() + 1000;
-        if (state.clientCount > 0) webSocket.broadcastTXT("{\"type\":\"button\",\"id\":2,\"press\":\"single\"}");
-      } else if (clickCount == 2) {
-        hudMessage = "<< Prev Track";
-        hudExpireTime = millis() + 1000;
-        if (state.clientCount > 0) webSocket.broadcastTXT("{\"type\":\"button\",\"id\":2,\"press\":\"double\"}");
-      } else if (clickCount >= 3) {
-        hudMessage = "Mute Toggle";
-        hudExpireTime = millis() + 1000;
-        if (state.clientCount > 0) webSocket.broadcastTXT("{\"type\":\"button\",\"id\":1,\"action\":\"mute_toggle\"}");
+      if (isKnobMenuOpen) {
+        // Confirm menu selection
+        state.screenMode = SCREEN_MODES[knobMenuIndex];
+        prefs.putString("screen", state.screenMode);
+        isKnobMenuOpen = false;
+        fullRedrawNeeded = true;
+        Serial.printf("[Knob Menu] Selected screen: %s\n", state.screenMode.c_str());
+
+        if (state.clientCount > 0) {
+          char buf[64];
+          snprintf(buf, sizeof(buf), "{\"type\":\"screen\",\"screen\":\"%s\"}", state.screenMode.c_str());
+          webSocket.broadcastTXT(buf);
+        }
+      } else {
+        if (clickCount == 1) {
+          hudMessage = "Skip >> Next";
+          hudExpireTime = millis() + 1000;
+          if (state.clientCount > 0) webSocket.broadcastTXT("{\"type\":\"button\",\"id\":2,\"press\":\"single\"}");
+        } else if (clickCount == 2) {
+          hudMessage = "<< Prev Track";
+          hudExpireTime = millis() + 1000;
+          if (state.clientCount > 0) webSocket.broadcastTXT("{\"type\":\"button\",\"id\":2,\"press\":\"double\"}");
+        } else if (clickCount >= 3) {
+          // Show Wi-Fi Connection Info overlay
+          drawWaitingScreen();
+          delay(2500);
+          fullRedrawNeeded = true;
+        }
       }
       clickCount = 0;
       fullRedrawNeeded = true;
     }
   }
 
-  // Clear HUD message upon expiration to cleanly erase ghost boxes
+  // Clear HUD message upon expiration
   if (hudMessage.length() > 0 && millis() >= hudExpireTime) {
     hudMessage = "";
     fullRedrawNeeded = true;
   }
 
-  // 3. Display Refresh
-  if (millis() - lastTftUpdate >= 50) {
+  // 3. Display Refresh Engine (Zero-Flicker & Autonomous Standalone)
+  if (!isKnobMenuOpen && millis() - lastTftUpdate >= 50) {
     lastTftUpdate = millis();
 
     if (state.clientCount == 0) {
-      if (fullRedrawNeeded) {
-        drawWaitingScreen();
-        fullRedrawNeeded = false;
+      // Standalone Mode: PC asleep / off -> Screen stays fully alive and functioning!
+      if (state.screenMode == "weather") {
+        if (fullRedrawNeeded) {
+          drawWeatherView(true);
+          drawStandaloneBadge();
+          fullRedrawNeeded = false;
+        }
+      } else {
+        // Default Standalone Desk Clock
+        if (fullRedrawNeeded) {
+          drawClockView(true);
+          drawStandaloneBadge();
+          fullRedrawNeeded = false;
+        } else {
+          drawClockView(false);
+          drawStandaloneBadge();
+        }
       }
     } else {
+      // Live Connected Sync Mode with Desktop App
       if (state.screenMode == "now_playing") {
         if (fullRedrawNeeded) {
           drawNowPlayingView(true);
@@ -1539,7 +1871,13 @@ void loop() {
       } else if (state.screenMode == "clock") {
         if (fullRedrawNeeded) {
           drawClockView(true);
-          // Clock mode has no footer progress bar
+          fullRedrawNeeded = false;
+        } else {
+          drawClockView(false);
+        }
+      } else if (state.screenMode == "weather") {
+        if (fullRedrawNeeded) {
+          drawWeatherView(true);
           fullRedrawNeeded = false;
         }
       } else { // "lyrics" mode
@@ -1555,10 +1893,15 @@ void loop() {
       }
 
       static uint32_t lastFooter = 0;
-      if (state.screenMode != "clock" && millis() - lastFooter >= 400) {
+      if (state.screenMode != "clock" && state.screenMode != "weather" && millis() - lastFooter >= 400) {
         lastFooter = millis();
         drawFooter(false);
       }
+    }
+
+    // Active Notification Toast Overlay
+    if (millis() < notifExpireTime) {
+      drawNotificationToast();
     }
   }
 

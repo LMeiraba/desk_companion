@@ -2,8 +2,10 @@ import { controlRouter } from './controlRouter';
 import { usePlayerStore } from '../stores/usePlayerStore';
 import { tauriIpc } from './tauriIpc';
 
+import { WeatherData } from './weatherService';
+
 export interface HardwareStatePayload {
-  screen: 'lyrics' | 'now_playing' | 'clock';
+  screen: 'lyrics' | 'now_playing' | 'clock' | 'weather';
   track: string;
   artist: string;
   albumArtUrl: string;
@@ -20,6 +22,7 @@ export interface HardwareStatePayload {
   volumePercent: number;
   timeStr?: string;
   dateStr?: string;
+  weather?: WeatherData;
 }
 
 type HardwareEventListener = (data: { type: string; payload: any }) => void;
@@ -175,6 +178,10 @@ class HardwareWebSocketService {
     if (this.socket && this.socket.readyState === WebSocket.OPEN) {
       this.socket.send(JSON.stringify(payload));
     }
+    // Also emit locally so the UI / simulator receives notifications immediately
+    if (payload.type === 'notification_alert') {
+      this.emit('notification', payload);
+    }
   }
 
   public getIsConnected(): boolean {
@@ -217,7 +224,7 @@ class HardwareWebSocketService {
 
       // Knob 3: Screen Switcher rotation
       if (knobId === 3 || msg.action === 'screen_cycle') {
-        const screens: ('lyrics' | 'now_playing' | 'clock')[] = ['lyrics', 'now_playing', 'clock'];
+        const screens: ('lyrics' | 'now_playing' | 'clock' | 'weather')[] = ['lyrics', 'now_playing', 'clock', 'weather'];
         const current = usePlayerStore.getState().deckScreen;
         const nextIndex = (screens.indexOf(current) + (delta > 0 ? 1 : -1) + screens.length) % screens.length;
         const next = screens[nextIndex];
@@ -265,7 +272,7 @@ class HardwareWebSocketService {
         controlRouter.previousTrack();
       } else if (press === 'long') {
         console.log('[HardwareWs] Knob long-press -> Cycling Screen Mode');
-        const screens: ('lyrics' | 'now_playing' | 'clock')[] = ['lyrics', 'now_playing', 'clock'];
+        const screens: ('lyrics' | 'now_playing' | 'clock' | 'weather')[] = ['lyrics', 'now_playing', 'clock', 'weather'];
         const current = usePlayerStore.getState().deckScreen;
         const next = screens[(screens.indexOf(current) + 1) % screens.length];
         usePlayerStore.getState().setDeckScreen(next);

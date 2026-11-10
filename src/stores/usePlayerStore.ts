@@ -22,8 +22,8 @@ interface PlayerState {
   searchQuery: string;
 
   // Hardware Deck Screen Sync
-  deckScreen: 'now_playing' | 'lyrics' | 'clock';
-  setDeckScreen: (screen: 'now_playing' | 'lyrics' | 'clock') => void;
+  deckScreen: 'now_playing' | 'lyrics' | 'clock' | 'weather';
+  setDeckScreen: (screen: 'now_playing' | 'lyrics' | 'clock' | 'weather') => void;
 
   setPlaybackState: (state: PlayerStateDto | null) => void;
   setDevices: (devices: DeviceDto[]) => void;

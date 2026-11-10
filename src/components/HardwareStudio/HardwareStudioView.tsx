@@ -26,7 +26,11 @@ import {
   Play,
   Pause,
   Timer,
+  CloudSun,
+  Thermometer,
+  Bell,
 } from 'lucide-react';
+import { weatherService, WeatherData } from '../../services/weatherService';
 
 export const HardwareStudioView: React.FC = () => {
   const { playbackState, deckScreen: activeScreen, setDeckScreen: setActiveScreen } = usePlayerStore();
@@ -36,9 +40,21 @@ export const HardwareStudioView: React.FC = () => {
   const activeStream = parsedLines;
   const activeIndex = activeLineIndex;
 
-  // Screen Modes: 'now_playing' | 'lyrics' | 'clock'
+  // Screen Modes: 'now_playing' | 'lyrics' | 'clock' | 'weather'
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+
+  // Live Weather & Notification Simulator State
+  const [liveWeather, setLiveWeather] = useState<WeatherData | null>(null);
+  const [activeNotification, setActiveNotification] = useState<{ title: string; body: string } | null>(null);
+
+  useEffect(() => {
+    weatherService.getWeather().then(setLiveWeather);
+    const interval = setInterval(() => {
+      weatherService.getWeather().then(setLiveWeather);
+    }, 10 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, []);
 
   // Knob 1 Volume Mode: 'spotify' | 'system' | 'app'
   const [volumeMode, setVolumeMode] = useState<'spotify' | 'system' | 'app'>('spotify');
@@ -55,7 +71,7 @@ export const HardwareStudioView: React.FC = () => {
     return localStorage.getItem('dc_deck_inverted') === 'true'; // default false for dark theme
   });
 
-  const handleScreenChange = (screen: 'lyrics' | 'now_playing' | 'clock') => {
+  const handleScreenChange = (screen: 'lyrics' | 'now_playing' | 'clock' | 'weather') => {
     setActiveScreen(screen);
     localStorage.setItem('dc_deck_screen', screen);
     if (hardwareWs.getIsConnected()) {
@@ -227,6 +243,13 @@ export const HardwareStudioView: React.FC = () => {
         setIsConnected(payload.connected);
         setIsConnecting(false);
       }
+      if (type === 'notification' || payload?.type === 'notification_alert') {
+        setActiveNotification({
+          title: payload.title || 'Notification',
+          body: payload.body || '',
+        });
+        setTimeout(() => setActiveNotification(null), 4500);
+      }
     });
     return unsub;
   }, []);
@@ -323,7 +346,7 @@ export const HardwareStudioView: React.FC = () => {
   // KNOB 3 ACTIONS: Screen Switcher & Menu Toggle
   const handleKnob3Rotate = (delta: number) => {
     setDial3Angle((prev) => (prev + delta * 25) % 360);
-    const screens: ('lyrics' | 'now_playing' | 'clock')[] = ['lyrics', 'now_playing', 'clock'];
+    const screens: ('lyrics' | 'now_playing' | 'clock' | 'weather')[] = ['lyrics', 'now_playing', 'clock', 'weather'];
     const currentIndex = screens.indexOf(activeScreen);
     const nextIndex = (currentIndex + delta + screens.length) % screens.length;
     handleScreenChange(screens[nextIndex]);
@@ -438,6 +461,17 @@ export const HardwareStudioView: React.FC = () => {
               }`}
             >
               <span>Desk Clock</span>
+            </button>
+            <button
+              onClick={() => handleScreenChange('weather')}
+              className={`px-3 py-1 rounded-lg font-bold text-[11px] transition-all flex items-center gap-1.5 ${
+                activeScreen === 'weather'
+                  ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 shadow-sm'
+                  : 'text-neutral-500 hover:text-neutral-300'
+              }`}
+            >
+              <CloudSun className="w-3.5 h-3.5" />
+              <span>Weather (Live+DHT)</span>
             </button>
           </div>
 
@@ -648,6 +682,57 @@ export const HardwareStudioView: React.FC = () => {
               </div>
             )}
 
+            {/* SCREEN CONTENT 4: WEATHER & SENSOR VIEW */}
+            {activeScreen === 'weather' && (
+              <div className="relative z-10 flex-1 flex flex-col justify-between py-2 text-center animate-in fade-in">
+                <div className="mt-2 space-y-1">
+                  <div className="flex items-center justify-center gap-1.5 text-neutral-400">
+                    <CloudSun className="w-3.5 h-3.5 text-amber-400" />
+                    <span className="text-[11px] font-bold uppercase tracking-wider">{liveWeather?.city || 'Local Weather'}</span>
+                  </div>
+                  <h3 className="text-4xl font-extrabold font-mono tracking-tighter text-white mt-1">
+                    {liveWeather?.temp ?? 24}°C
+                  </h3>
+                  <p className="text-[11px] font-medium font-mono text-emerald-400">
+                    {liveWeather?.condition || 'Partly Cloudy'}
+                  </p>
+                  <div className="flex justify-center gap-3 text-[10px] text-neutral-400 font-mono mt-1">
+                    <span>H: {liveWeather?.highTemp ?? 28}°</span>
+                    <span>L: {liveWeather?.lowTemp ?? 18}°</span>
+                    <span>RH: {liveWeather?.humidity ?? 50}%</span>
+                  </div>
+                </div>
+
+                {/* Indoor DHT Sensor Card */}
+                <div className="p-2.5 bg-neutral-900/90 rounded-2xl border border-neutral-800 text-left mb-1">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-[10px] font-bold text-neutral-300 flex items-center gap-1.5">
+                      <Thermometer className="w-3 h-3 text-cyan-400" />
+                      Indoor Sensor (DHT-8)
+                    </span>
+                    <span className="text-[9px] px-1.5 py-0.2 rounded bg-cyan-950/80 border border-cyan-800/50 text-cyan-400 font-mono">
+                      GPIO 8
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center text-[10px] font-mono text-neutral-200 mt-1">
+                    <span>Temp: <strong className="text-white">24.5°C</strong></span>
+                    <span>Humidity: <strong className="text-cyan-400">52%</strong></span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Notification Toast Alert Overlay */}
+            {activeNotification && (
+              <div className="absolute top-2 left-2 right-2 z-40 p-2.5 rounded-xl bg-neutral-900/95 border border-emerald-500/50 shadow-2xl animate-in slide-in-from-top-3 duration-300">
+                <div className="flex items-center gap-2 mb-0.5">
+                  <Bell className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                  <span className="text-[11px] font-bold text-neutral-100 truncate">{activeNotification.title}</span>
+                </div>
+                <p className="text-[9px] text-neutral-300 line-clamp-2 pl-5.5">{activeNotification.body}</p>
+              </div>
+            )}
+
             {/* Overlay Mode Feedback Badge (Triggered when knob is turned) */}
             {modePopup && (
               <div className="absolute top-4 left-1/2 -translate-x-1/2 z-30 px-3 py-1 rounded-full bg-neutral-900/95 border border-neutral-700 shadow-xl text-[10px] font-mono font-bold text-emerald-400 animate-in fade-in zoom-in-95">
@@ -661,7 +746,7 @@ export const HardwareStudioView: React.FC = () => {
                 <p className="text-[10px] font-mono uppercase text-neutral-400 tracking-wider mb-1 text-center">
                   Select Screen (Knob 3)
                 </p>
-                {(['lyrics', 'now_playing', 'clock'] as const).map((scr) => (
+                {(['lyrics', 'now_playing', 'clock', 'weather'] as const).map((scr) => (
                   <button
                     key={scr}
                     onClick={() => {
